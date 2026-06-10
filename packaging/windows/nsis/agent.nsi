@@ -48,37 +48,26 @@ Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_LANGUAGE "English"
 
 ;--------------------------------
-; Config page
+; Config page — collect registration token only (server URL is pre-configured)
 ;--------------------------------
-Var ServerUrl
 Var RegToken
-Var hServerUrlEdit
 Var hRegTokenEdit
 
 Function ConfigPageCreate
   nsDialogs::Create 1018
   Pop $0
 
-  ${NSD_CreateLabel} 0 0 100% 12u "Server URL:"
-  ${NSD_CreateText} 0 14u 100% 14u ""
-  Pop $hServerUrlEdit
-
-  ${NSD_CreateLabel} 0 36u 100% 12u "Registration Token (optional):"
-  ${NSD_CreatePassword} 0 50u 100% 14u ""
+  ${NSD_CreateLabel} 0 0 100% 12u "Registration Token:"
+  ${NSD_CreatePassword} 0 14u 100% 14u ""
   Pop $hRegTokenEdit
 
-  ${NSD_CreateLabel} 0 70u 100% 24u "Obtain the token from your server's admin panel.$\nYou can also set these later in config.json."
+  ${NSD_CreateLabel} 0 36u 100% 24u "Obtain the token from your server's admin panel.$\nYou can also set it later in config.json."
 
   nsDialogs::Show
 FunctionEnd
 
 Function ConfigPageLeave
-  ${NSD_GetText} $hServerUrlEdit $ServerUrl
   ${NSD_GetText} $hRegTokenEdit $RegToken
-  ${If} $ServerUrl == ""
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Server URL is required."
-    Abort
-  ${EndIf}
 FunctionEnd
 
 ;--------------------------------
@@ -102,8 +91,8 @@ Section "Main" SecMain
   CreateDirectory "$APPDATA\RemoteTerminalCloudAgent\logs"
   CopyFiles "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json" "$APPDATA\RemoteTerminalCloudAgent\config.json"
 
-  ; Patch config with user-supplied values
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -ServerUrl "$ServerUrl" -RegToken "$RegToken"'
+  ; Patch config with user-supplied token (server URL already embedded at build time)
+  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -RegToken "$RegToken"'
 
   ; Install and start service
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\install-service.ps1"'

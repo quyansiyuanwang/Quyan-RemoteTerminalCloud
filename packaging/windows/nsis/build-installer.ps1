@@ -40,6 +40,24 @@ if (-not $Makensis) { throw "makensis.exe not found. Install NSIS and ensure it 
 
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir | Out-Null }
 
+# Read server URL from .env.production (repo root, two levels above packaging/windows/nsis)
+$ServerUrl = ""
+$EnvProd = Join-Path $PSScriptRoot "..\..\..\..\.env.production"
+if (Test-Path $EnvProd) {
+  Get-Content $EnvProd | Where-Object { $_ -match "^RTC_SERVER_BASE_URL\s*=\s*(.+)" } | ForEach-Object {
+    $ServerUrl = $Matches[1].Trim()
+  }
+}
+
+# Pre-write server URL into the staged config.json so the installer doesn't ask for it
+$configPath = Join-Path $AgentBuildRoot "packaging\windows\agent.config.json"
+if ($ServerUrl) {
+  $config = Get-Content $configPath -Raw | ConvertFrom-Json
+  $config.serverBaseUrl = $ServerUrl
+  $config | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
+  Write-Host "Embedded serverBaseUrl: $ServerUrl"
+}
+
 $NsiScript = Join-Path $PSScriptRoot "agent.nsi"
 
 & $Makensis.Source `
