@@ -1,8 +1,11 @@
 $ServiceName = "RemoteTerminalCloudAgent"
-if (Test-Path (Join-Path $PSScriptRoot "service\RemoteTerminalCloudAgentService.exe")) {
-  $InstallRoot = $PSScriptRoot
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (Test-Path (Join-Path $ScriptDir "service\RemoteTerminalCloudAgentService.exe")) {
+  $InstallRoot = $ScriptDir
+} elseif (Test-Path (Join-Path $ScriptDir "..\..\service\RemoteTerminalCloudAgentService.exe")) {
+  $InstallRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 } else {
-  $InstallRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+  throw "Cannot locate install root from $ScriptDir"
 }
 $WinSWExe = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.exe"
 

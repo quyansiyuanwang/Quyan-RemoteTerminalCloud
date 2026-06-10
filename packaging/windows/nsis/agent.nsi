@@ -82,18 +82,19 @@ Section "Main" SecMain
   File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
 
   SetOutPath "$INSTDIR\service"
   File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.exe"
   File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.xml"
 
-  ; Write default config to ProgramData
-  SetShellVarContext all
-  SetOutPath "$COMMONAPPDATA\RemoteTerminalCloudAgent"
-  File /oname=config.json "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
-  CreateDirectory "$COMMONAPPDATA\RemoteTerminalCloudAgent\logs"
-
-  ; Patch config with user-supplied token (server URL already embedded at build time)
+  ; Write default config and patch token — done entirely via PowerShell to avoid
+  ; NSIS path-variable expansion issues with $COMMONAPPDATA on some Windows versions.
+  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -Command \
+    "$d=[System.Environment]::GetFolderPath(''CommonApplicationData'') + ''\RemoteTerminalCloudAgent''; \
+    New-Item -ItemType Directory -Force -Path $d | Out-Null; \
+    New-Item -ItemType Directory -Force -Path ($d+''\\logs'') | Out-Null; \
+    Copy-Item -Force ''$INSTDIR\agent.config.json'' ($d+''\\config.json'')"'
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -RegToken "$RegToken"'
 
   ; Install and start service
