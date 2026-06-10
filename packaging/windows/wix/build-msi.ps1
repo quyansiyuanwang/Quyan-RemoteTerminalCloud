@@ -54,7 +54,7 @@ Write-Host "Detected WiX version: $WixFullVersion (major: $WixMajorVersion)"
 
 # Install the UI extension pinned to the same major.minor.patch as wix.exe itself.
 # Using the exact version avoids the wixextN folder mismatch error.
-& $WixCommand.Source extension add "WixToolset.UI.wixext" --version $WixFullVersion --global 2>&1 | Write-Host
+& $WixCommand.Source extension add "WixToolset.UI.wixext/$WixFullVersion" --global 2>&1 | Write-Host
 Write-Host "wix extension add exited $LASTEXITCODE"
 
 $MsiPath = Join-Path $OutputDir "RemoteTerminalCloudAgent.msi"
