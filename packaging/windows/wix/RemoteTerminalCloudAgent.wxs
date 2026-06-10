@@ -16,8 +16,8 @@
     <UIRef Id="AgentUI" />
 
     <!-- Secure properties so deferred CustomActions can read them via CustomActionData -->
-    <Property Id="RTC_SERVER_URL" Value="" Secure="yes" />
-    <Property Id="RTC_REG_TOKEN" Value="" Secure="yes" Hidden="yes" />
+    <Property Id="RTC_SERVER_URL" Secure="yes" />
+    <Property Id="RTC_REG_TOKEN" Secure="yes" Hidden="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent">
@@ -85,9 +85,9 @@
       ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]uninstall-service.ps1&quot;" />
 
     <InstallExecuteSequence>
-      <Custom Action="WriteConfig" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="InstallService" After="WriteConfig">NOT Installed</Custom>
-      <Custom Action="UninstallService" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="WriteConfig" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="InstallService" After="WriteConfig" Condition="NOT Installed" />
+      <Custom Action="UninstallService" Before="RemoveFiles" Condition="Installed AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
   </Package>
