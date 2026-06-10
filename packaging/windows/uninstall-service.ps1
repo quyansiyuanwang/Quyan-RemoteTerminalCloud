@@ -1,6 +1,9 @@
 $ServiceName = "RemoteTerminalCloudAgent"
-$PackageRoot = Split-Path -Parent $PSScriptRoot
-$InstallRoot = Split-Path -Parent $PackageRoot
+if (Test-Path (Join-Path $PSScriptRoot "service\RemoteTerminalCloudAgentService.exe")) {
+  $InstallRoot = $PSScriptRoot
+} else {
+  $InstallRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
 $WinSWExe = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.exe"
 
 $ErrorActionPreference = "Stop"

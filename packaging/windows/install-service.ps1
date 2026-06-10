@@ -1,7 +1,13 @@
 $ServiceName = "RemoteTerminalCloudAgent"
 $DisplayName = "Remote Terminal Cloud Agent"
-$PackageRoot = Split-Path -Parent $PSScriptRoot
-$InstallRoot = Split-Path -Parent $PackageRoot
+# When invoked by MSI the script sits directly in INSTALLFOLDER; when run from
+# source it sits under packaging/windows/ two levels above the install root.
+# Detect which case we're in by looking for the known runtime marker.
+if (Test-Path (Join-Path $PSScriptRoot "runtime\node.exe")) {
+  $InstallRoot = $PSScriptRoot
+} else {
+  $InstallRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
 $NodeExe = Join-Path $InstallRoot "runtime\node.exe"
 $AgentEntry = Join-Path $InstallRoot "dist\index.js"
 $WinSWExe = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.exe"

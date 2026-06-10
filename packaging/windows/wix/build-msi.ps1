@@ -13,12 +13,14 @@ $AgentBuildRoot = [System.IO.Path]::GetFullPath($AgentBuildRoot)
 $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 
 $WixFile = Join-Path $PSScriptRoot "RemoteTerminalCloudAgent.wxs"
+$WixUiFile = Join-Path $PSScriptRoot "AgentConfigDlg.wxs"
 $WixCommand = Get-Command wix.exe -ErrorAction SilentlyContinue
 
 foreach ($RequiredPath in @(
   (Join-Path $AgentBuildRoot "dist"),
   (Join-Path $AgentBuildRoot "packaging\windows\install-service.ps1"),
   (Join-Path $AgentBuildRoot "packaging\windows\uninstall-service.ps1"),
+  (Join-Path $AgentBuildRoot "packaging\windows\write-config.ps1"),
   (Join-Path $AgentBuildRoot "runtime\node.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.xml")
@@ -61,11 +63,11 @@ if ($AcceptEula) {
 }
 
 $WixArguments += @(
-  "-d",
-  "AgentBuildRoot=$AgentBuildRoot",
+  "-ext", "WixToolset.UI.wixext",
+  "-d", "AgentBuildRoot=$AgentBuildRoot",
   $WixFile,
-  "-out",
-  $MsiPath
+  $WixUiFile,
+  "-out", $MsiPath
 )
 
 & $WixCommand.Source @WixArguments

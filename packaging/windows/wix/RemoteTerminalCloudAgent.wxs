@@ -12,6 +12,13 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Remote Terminal Cloud Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- UI: fully custom flow defined in AgentConfigDlg.wxs -->
+    <UIRef Id="AgentUI" />
+
+    <!-- Secure properties so deferred CustomActions can read them via CustomActionData -->
+    <Property Id="RTC_SERVER_URL" Value="" Secure="yes" />
+    <Property Id="RTC_REG_TOKEN" Value="" Secure="yes" Hidden="yes" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent">
         <Directory Id="SERVICEFOLDER" Name="service" />
@@ -36,6 +43,7 @@
       <Files Include="$(var.AgentBuildRoot)\dist\**" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\write-config.ps1" />
       <Files Include="$(var.AgentBuildRoot)\runtime\node.exe" />
     </ComponentGroup>
 
@@ -51,24 +59,36 @@
       <CreateFolder />
     </Component>
 
+    <!-- WinSW wrapper: files only, service lifecycle managed by PS scripts -->
     <Component Id="ServiceWrapperComponent" Directory="SERVICEFOLDER" Guid="A9D91CF9-43F6-4227-934B-988D53A4887D">
       <File Id="RemoteTerminalCloudAgentServiceExe" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" KeyPath="yes" />
       <File Id="RemoteTerminalCloudAgentServiceXml" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
-      <ServiceInstall
-        Id="RemoteTerminalCloudAgentServiceInstaller"
-        Name="RemoteTerminalCloudAgent"
-        DisplayName="Remote Terminal Cloud Agent"
-        Description="Outbound remote terminal agent service."
-        Start="auto"
-        Type="ownProcess"
-        ErrorControl="normal" />
-      <ServiceControl
-        Id="RemoteTerminalCloudAgentServiceControl"
-        Name="RemoteTerminalCloudAgent"
-        Start="install"
-        Stop="both"
-        Remove="uninstall"
-        Wait="yes" />
     </Component>
+
+    <!--
+      WriteConfig: patch config.json with user input before the service starts.
+      SetProperty feeds [RTC_SERVER_URL]|[RTC_REG_TOKEN] into CustomActionData so the
+      deferred (elevated, no UI) CA can read it via $env:CustomActionData.
+    -->
+    <SetProperty Id="WriteConfig" Value="[RTC_SERVER_URL]|[RTC_REG_TOKEN]"
+                 Before="WriteConfig" Sequence="execute" />
+    <CustomAction Id="WriteConfig" Directory="PROGRAMDATA_AGENT"
+      Execute="deferred" Impersonate="no" Return="check"
+      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]write-config.ps1&quot;" />
+
+    <CustomAction Id="InstallService" Directory="INSTALLFOLDER"
+      Execute="deferred" Impersonate="no" Return="check"
+      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install-service.ps1&quot;" />
+
+    <CustomAction Id="UninstallService" Directory="INSTALLFOLDER"
+      Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]uninstall-service.ps1&quot;" />
+
+    <InstallExecuteSequence>
+      <Custom Action="WriteConfig" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="InstallService" After="WriteConfig">NOT Installed</Custom>
+      <Custom Action="UninstallService" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+
   </Package>
 </Wix>
