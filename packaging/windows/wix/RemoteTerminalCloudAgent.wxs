@@ -12,7 +12,8 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Remote Terminal Cloud Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- UI: fully custom flow defined in AgentConfigDlg.wxs -->
+    <!-- WixUI_Minimal provides the base dialog flow; AgentUI injects AgentConfigDlg -->
+    <UIRef Id="WixUI_Minimal" />
     <UIRef Id="AgentUI" />
 
     <!-- Secure properties so deferred CustomActions can read them via CustomActionData -->
