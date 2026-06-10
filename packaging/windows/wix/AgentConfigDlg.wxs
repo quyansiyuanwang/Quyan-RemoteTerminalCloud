@@ -1,17 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Fragment>
     <UI Id="AgentUI">
+      <!-- Reuse WixUI_Minimal's complete sequence (Welcome→EULA→VerifyReady→Exit) -->
+      <ui:WixUI Id="WixUI_Minimal" />
 
-      <DialogRef Id="WelcomeDlg" />
-      <DialogRef Id="LicenseAgreementDlg" />
-      <DialogRef Id="VerifyReadyDlg" />
-      <DialogRef Id="CancelDlg" />
-      <DialogRef Id="ErrorDlg" />
-      <DialogRef Id="FilesInUse" />
-      <DialogRef Id="FatalError" />
-      <DialogRef Id="UserExit" />
-      <DialogRef Id="ExitDialog" />
+      <!-- Insert AgentConfigDlg between EULA and VerifyReady -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
+               Value="AgentConfigDlg" Condition='LicenseAccepted = "1"' Order="2" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
+               Value="AgentConfigDlg" Condition="NOT Installed" Order="2" />
 
       <Dialog Id="AgentConfigDlg" Width="370" Height="270" Title="[ProductName] Setup">
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="yes" Text="WixUI_Bmp_Banner" />
@@ -24,7 +23,8 @@
 
         <Control Id="RegTokenLabel" Type="Text" X="25" Y="112" Width="320" Height="10" Text="Registration &amp;Token (optional):" />
         <Control Id="RegTokenEdit" Type="Edit" X="25" Y="124" Width="320" Height="18" Property="RTC_REG_TOKEN" Password="yes" />
-        <Control Id="RegTokenHint" Type="Text" X="25" Y="145" Width="320" Height="18" Transparent="yes" Text="{\WixUI_Font_Smaller}Obtain from your server's admin panel. Can be set later in config.json." />
+        <Control Id="RegTokenHint" Type="Text" X="25" Y="145" Width="320" Height="18" Transparent="yes"
+                 Text="{\WixUI_Font_Smaller}Obtain from your server's admin panel. Can be set later in config.json." />
 
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="248" Width="56" Height="17" Text="&amp;Back">
@@ -38,26 +38,6 @@
           <Publish Event="SpawnDialog" Value="CancelDlg" />
         </Control>
       </Dialog>
-
-      <!-- Dialog flow -->
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" />
-      <Publish Dialog="WelcomeDlg" Control="Cancel" Event="SpawnDialog" Value="CancelDlg" />
-
-      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="AgentConfigDlg" Condition='LicenseAccepted = "1"' />
-      <Publish Dialog="LicenseAgreementDlg" Control="Cancel" Event="SpawnDialog" Value="CancelDlg" />
-
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="AgentConfigDlg" Condition="NOT Installed" />
-      <Publish Dialog="VerifyReadyDlg" Control="Install" Event="EndDialog" Value="Return" />
-      <Publish Dialog="VerifyReadyDlg" Control="Cancel" Event="SpawnDialog" Value="CancelDlg" />
-
-      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" />
-
-      <InstallUISequence>
-        <Show Dialog="WelcomeDlg" Before="VerifyReadyDlg" Condition="NOT Installed" />
-        <Show Dialog="VerifyReadyDlg" Before="ExecuteAction" />
-        <Show Dialog="ExitDialog" After="InstallFinalize" />
-      </InstallUISequence>
     </UI>
   </Fragment>
 </Wix>
