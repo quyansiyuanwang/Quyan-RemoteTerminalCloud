@@ -88,8 +88,9 @@ Section "Main" SecMain
 
   ; Write default config to ProgramData
   SetShellVarContext all
-  CreateDirectory "$APPDATA\RemoteTerminalCloudAgent\logs"
-  CopyFiles "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json" "$APPDATA\RemoteTerminalCloudAgent\config.json"
+  CreateDirectory "$COMMONAPPDATA\RemoteTerminalCloudAgent\logs"
+  SetOutPath "$COMMONAPPDATA\RemoteTerminalCloudAgent"
+  File /oname=config.json "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
 
   ; Patch config with user-supplied token (server URL already embedded at build time)
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -RegToken "$RegToken"'
