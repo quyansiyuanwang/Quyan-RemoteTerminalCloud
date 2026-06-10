@@ -101,6 +101,10 @@ jobs:
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
         run: pnpm build:artifact
 
+      - name: Install NSIS
+        if: matrix.target_platform == 'win32'
+        run: choco install nsis --no-progress -y
+
       - name: Prepare Windows installer stage
         if: matrix.target_platform == 'win32'
         shell: pwsh
