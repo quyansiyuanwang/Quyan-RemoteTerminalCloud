@@ -1,0 +1,18 @@
+[Unit]
+Description=Remote Terminal Cloud Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/remote-terminal-cloud-agent
+Environment=RTC_CONFIG_FILE=/etc/remote-terminal-cloud-agent/config.json
+EnvironmentFile=-/etc/remote-terminal-cloud-agent/agent.env
+ExecStart=/opt/remote-terminal-cloud-agent/runtime/node /opt/remote-terminal-cloud-agent/dist/index.js
+Restart=always
+RestartSec=5
+User=remote-terminal-agent
+Group=remote-terminal-agent
+
+[Install]
+WantedBy=multi-user.target

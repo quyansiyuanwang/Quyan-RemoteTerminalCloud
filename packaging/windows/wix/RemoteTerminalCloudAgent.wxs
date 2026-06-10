@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Remote Terminal Cloud Agent"
+    Manufacturer="Remote Terminal Cloud"
+    Version="0.1.0"
+    UpgradeCode="A7A32B15-4E12-4DAB-8B9A-3C91F275AE60"
+    InstallerVersion="500"
+    Scope="perMachine"
+    Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Remote Terminal Cloud Agent is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="PROGRAMDATA_AGENT" Name="RemoteTerminalCloudAgent" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Remote Terminal Cloud Agent" Level="1">
+      <ComponentGroupRef Id="AgentFiles" />
+      <ComponentRef Id="ProgramDataDirectoryComponent" />
+    </Feature>
+
+    <InstallExecuteSequence>
+      <Custom Action="InstallAgentService" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="UninstallAgentService" Before="RemoveFiles" Condition="REMOVE='ALL'" />
+    </InstallExecuteSequence>
+    <CustomAction
+      Id="InstallAgentService"
+      Directory="INSTALLFOLDER"
+      Execute="deferred"
+      ExeCommand="powershell.exe -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]packaging\windows\install-service.ps1&quot;"
+      Return="check"
+      Impersonate="no" />
+
+    <CustomAction
+      Id="UninstallAgentService"
+      Directory="INSTALLFOLDER"
+      Execute="deferred"
+      ExeCommand="powershell.exe -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]packaging\windows\uninstall-service.ps1&quot;"
+      Return="ignore"
+      Impersonate="no" />
+
+    <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.AgentBuildRoot)\dist\**" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\agent.config.json" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" />
+      <Files Include="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
+      <Files Include="$(var.AgentBuildRoot)\runtime\node.exe" />
+    </ComponentGroup>
+
+    <Component Id="ProgramDataDirectoryComponent" Directory="PROGRAMDATA_AGENT" Guid="E5D1A49D-ED8A-43E6-B70A-171D362BF04D">
+      <CreateFolder />
+    </Component>
+  </Package>
+</Wix>

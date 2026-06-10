@@ -1,0 +1,66 @@
+param(
+  [Parameter(Mandatory = $true)]
+  [string]$AgentBuildRoot,
+  [Parameter(Mandatory = $false)]
+  [string]$OutputDir = (Join-Path $PSScriptRoot "out"),
+  [Parameter(Mandatory = $false)]
+  [switch]$AcceptEula
+)
+
+$ErrorActionPreference = "Stop"
+
+$AgentBuildRoot = [System.IO.Path]::GetFullPath($AgentBuildRoot)
+$OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
+
+$WixFile = Join-Path $PSScriptRoot "RemoteTerminalCloudAgent.wxs"
+
+foreach ($RequiredPath in @(
+  (Join-Path $AgentBuildRoot "dist"),
+  (Join-Path $AgentBuildRoot "packaging\windows\install-service.ps1"),
+  (Join-Path $AgentBuildRoot "packaging\windows\uninstall-service.ps1"),
+  (Join-Path $AgentBuildRoot "runtime\node.exe"),
+  (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.exe"),
+  (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.xml")
+)) {
+  if (-not (Test-Path $RequiredPath)) {
+    throw "Required MSI build input missing: $RequiredPath"
+  }
+}
+
+if (-not (Get-Command wix.exe -ErrorAction SilentlyContinue)) {
+  throw "wix.exe not found. Install WiX Toolset CLI and ensure it is on PATH."
+}
+
+if (-not (Test-Path $AgentBuildRoot)) {
+  throw "AgentBuildRoot not found: $AgentBuildRoot"
+}
+
+if (-not (Test-Path $OutputDir)) {
+  New-Item -ItemType Directory -Path $OutputDir | Out-Null
+}
+
+$MsiPath = Join-Path $OutputDir "RemoteTerminalCloudAgent.msi"
+
+$WixArguments = @(
+  "build"
+)
+
+if ($AcceptEula) {
+  $WixArguments += @("--acceptEula", "yes")
+}
+
+$WixArguments += @(
+  "-d",
+  "AgentBuildRoot=$AgentBuildRoot",
+  $WixFile,
+  "-out",
+  $MsiPath
+)
+
+& wix.exe @WixArguments
+
+if ($LASTEXITCODE -ne 0) {
+  throw "wix build failed with exit code $LASTEXITCODE"
+}
+
+Write-Host "Built MSI at $MsiPath"

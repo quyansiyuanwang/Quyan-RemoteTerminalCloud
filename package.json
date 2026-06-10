@@ -1,0 +1,30 @@
+{
+  "name": "@rtc/agent",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build:protocol": "pnpm --filter @rtc/protocol build",
+    "build": "pnpm build:protocol && tsc -p tsconfig.json",
+    "build:bundle": "pnpm build && node scripts/build-release-bundle.mjs",
+    "build:agent:bundle": "pnpm build:bundle",
+    "dev": "pnpm build:protocol && tsx src/index.ts",
+    "dev:agent": "pnpm dev",
+    "start": "node dist/index.js",
+    "start:agent": "pnpm start",
+    "typecheck": "pnpm build:protocol && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@rtc/protocol": "workspace:*",
+    "dotenv": "^17.2.1",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
