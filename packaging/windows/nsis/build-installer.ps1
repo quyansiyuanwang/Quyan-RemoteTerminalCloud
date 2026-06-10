@@ -31,6 +31,11 @@ foreach ($RequiredPath in @(
 }
 
 $Makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+if (-not $Makensis) {
+  # Chocolatey installs NSIS here; PATH may not be refreshed in the current shell
+  $chocoPath = "C:\Program Files (x86)\NSIS\makensis.exe"
+  if (Test-Path $chocoPath) { $Makensis = @{ Source = $chocoPath } }
+}
 if (-not $Makensis) { throw "makensis.exe not found. Install NSIS and ensure it is on PATH." }
 
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir | Out-Null }
