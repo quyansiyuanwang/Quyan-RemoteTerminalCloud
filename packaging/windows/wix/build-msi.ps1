@@ -42,6 +42,13 @@ if (-not (Test-Path $OutputDir)) {
   New-Item -ItemType Directory -Path $OutputDir | Out-Null
 }
 
+# Ensure the WiX UI extension is available (wix.exe extension add is idempotent)
+& $WixCommand.Source extension add WixToolset.UI.wixext --global 2>$null
+if ($LASTEXITCODE -ne 0) {
+  # Non-fatal: extension may already be installed
+  Write-Host "Note: 'wix extension add WixToolset.UI.wixext' returned $LASTEXITCODE (may already be installed)"
+}
+
 $MsiPath = Join-Path $OutputDir "RemoteTerminalCloudAgent.msi"
 
 $WixArguments = @(
