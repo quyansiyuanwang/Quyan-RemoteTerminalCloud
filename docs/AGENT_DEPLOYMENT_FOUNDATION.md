@@ -61,8 +61,15 @@ Current CI outputs:
 - macOS: `release/artifacts/darwin-arm64/*.tar.gz`
 - Windows: `release/artifacts/win32-x64/*.zip`
 - Windows MSI: `release/remote-terminal-cloud-agent-<version>/artifacts/windows/msi-build-root/artifacts/windows/out/*.msi`
+- GitHub Release on `v*` tags: all archived assets above plus `SHA256SUMS.txt`
 
-The CI pipeline currently focuses on build validation and packaging handoff artifacts. It does not yet add signing, notarization, or publish-to-release automation.
+Release automation rules:
+
+- tag pattern: `v*`
+- tag/version validation: `github.ref_name` must equal `v${package.json version}`
+- prerelease detection: any tag containing `-` is published as a prerelease
+
+The CI pipeline now publishes GitHub Releases automatically for version tags, but it still does not add signing, notarization, or external distribution publishing.
 
 ## Runtime configuration
 
