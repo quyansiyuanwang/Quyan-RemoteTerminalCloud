@@ -5,12 +5,14 @@ import { resolveEffectiveDefaultShell } from "./shells";
 import { runAgentTunnel } from "./tunnel";
 
 const agentVersion = "0.1.0";
+const missingConfigRetryMs = 30_000;
+const runtimeRetryMs = 10_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function main(): Promise<void> {
+async function runAgentOnce(): Promise<void> {
   const config = getAgentRuntimeConfig();
   const snapshot = await collectHostSnapshot(agentVersion, config.enabledShellTypes);
   const effectiveDefaultShell = resolveEffectiveDefaultShell(
@@ -40,7 +42,10 @@ async function main(): Promise<void> {
   }
 
   if (!config.registrationToken) {
-    console.log("[remote-terminal-cloud-agent] registration skipped: RTC_REGISTRATION_TOKEN is not set.");
+    console.warn(
+      `[remote-terminal-cloud-agent] waiting for configuration: set RTC_REGISTRATION_TOKEN in ${config.configFilePath} or environment, then the service will retry automatically.`,
+    );
+    await sleep(missingConfigRetryMs);
     return;
   }
 
@@ -73,13 +78,26 @@ async function main(): Promise<void> {
   }
 
   if (tasks.length === 0) {
+    console.warn("[remote-terminal-cloud-agent] heartbeat and tunnel are both disabled; retrying later.");
+    await sleep(missingConfigRetryMs);
     return;
   }
 
   await Promise.all(tasks);
 }
 
+async function main(): Promise<never> {
+  while (true) {
+    try {
+      await runAgentOnce();
+    } catch (error: unknown) {
+      console.error("[remote-terminal-cloud-agent] runtime error; retrying", error);
+      await sleep(runtimeRetryMs);
+    }
+  }
+}
+
 main().catch((error: unknown) => {
-  console.error("[remote-terminal-cloud-agent] fatal error", error);
+  console.error("[remote-terminal-cloud-agent] fatal bootstrap error", error);
   process.exitCode = 1;
 });

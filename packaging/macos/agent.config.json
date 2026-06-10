@@ -1,6 +1,6 @@
 {
-  "serverBaseUrl": "https://your-domain.example.com",
-  "registrationToken": "replace-with-real-token",
+  "serverBaseUrl": "",
+  "registrationToken": "",
   "runHeartbeat": true,
   "runTunnel": true,
   "defaultShellType": "system-default",

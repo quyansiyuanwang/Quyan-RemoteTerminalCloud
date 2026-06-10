@@ -9,6 +9,8 @@ This directory contains the first-pass Windows service and MSI scaffolding for t
 - Config path: `%ProgramData%\RemoteTerminalCloudAgent\config.json`
 - Logs path: `%ProgramData%\RemoteTerminalCloudAgent\logs`
 
+The default `config.json` template is intentionally written with empty `serverBaseUrl` and `registrationToken` values. Until these are configured, the service will stay installed and keep retrying instead of terminating immediately.
+
 The MSI now installs the Windows service via standard WiX `ServiceInstall` / `ServiceControl` tables instead of launching PowerShell custom actions during install.
 
 ## Files

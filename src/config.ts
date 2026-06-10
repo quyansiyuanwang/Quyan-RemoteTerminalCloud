@@ -54,6 +54,22 @@ function readString(name: string): string | null {
   return value ? value : null;
 }
 
+function normalizeTemplateString(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value === "https://your-domain.example.com") {
+    return null;
+  }
+
+  if (value === "replace-with-real-token") {
+    return null;
+  }
+
+  return value;
+}
+
 function readBooleanEnv(name: string): boolean | null {
   const value = readString(name);
   if (value === null) {
@@ -162,10 +178,10 @@ function readConfigFile(configFilePath: string): AgentFileConfig {
         ? parsed.defaultShellType
         : undefined;
 
-    const serverBaseUrl = typeof parsed.serverBaseUrl === "string" ? parsed.serverBaseUrl.trim() : undefined;
+    const serverBaseUrl = typeof parsed.serverBaseUrl === "string" ? normalizeTemplateString(parsed.serverBaseUrl.trim()) : undefined;
     const registrationToken =
       typeof parsed.registrationToken === "string"
-        ? parsed.registrationToken.trim() || null
+        ? normalizeTemplateString(parsed.registrationToken.trim())
         : parsed.registrationToken === null
           ? null
           : undefined;
@@ -202,8 +218,8 @@ export function getAgentRuntimeConfig(): AgentRuntimeConfig {
   const defaultShellCandidate = configuredDefaultShell ?? fileConfig.defaultShellType;
 
   return {
-    serverBaseUrl: readString("RTC_SERVER_BASE_URL") ?? fileConfig.serverBaseUrl ?? "http://127.0.0.1:10001",
-    registrationToken: readString("RTC_REGISTRATION_TOKEN") ?? fileConfig.registrationToken ?? null,
+    serverBaseUrl: normalizeTemplateString(readString("RTC_SERVER_BASE_URL")) ?? fileConfig.serverBaseUrl ?? "http://127.0.0.1:10001",
+    registrationToken: normalizeTemplateString(readString("RTC_REGISTRATION_TOKEN")) ?? fileConfig.registrationToken ?? null,
     runHeartbeat: heartbeatEnabled === null ? (fileConfig.runHeartbeat ?? true) : !heartbeatEnabled,
     runTunnel: tunnelEnabled === null ? (fileConfig.runTunnel ?? true) : !tunnelEnabled,
     defaultShellType: isSupportedShellType(defaultShellCandidate) ? defaultShellCandidate : "system-default",
