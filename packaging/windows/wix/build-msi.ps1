@@ -42,12 +42,20 @@ if (-not (Test-Path $OutputDir)) {
   New-Item -ItemType Directory -Path $OutputDir | Out-Null
 }
 
-# Ensure the WiX UI extension is available (wix.exe extension add is idempotent)
-& $WixCommand.Source extension add WixToolset.UI.wixext --global 2>$null
-if ($LASTEXITCODE -ne 0) {
-  # Non-fatal: extension may already be installed
-  Write-Host "Note: 'wix extension add WixToolset.UI.wixext' returned $LASTEXITCODE (may already be installed)"
+# Resolve WiX major version so we can install the matching extension
+$WixVersionOutput = & $WixCommand.Source --version 2>$null
+$WixVersionText = [string]::Join("`n", $WixVersionOutput)
+$WixMajorVersion = 0
+if ($WixVersionText -match "(\d+)\.(\d+)\.(\d+)") {
+  $WixMajorVersion = [int]$Matches[1]
+  $WixFullVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3])"
 }
+Write-Host "Detected WiX version: $WixFullVersion (major: $WixMajorVersion)"
+
+# Install the UI extension pinned to the same major.minor.patch as wix.exe itself.
+# Using the exact version avoids the wixextN folder mismatch error.
+& $WixCommand.Source extension add "WixToolset.UI.wixext" --version $WixFullVersion --global 2>&1 | Write-Host
+Write-Host "wix extension add exited $LASTEXITCODE"
 
 $MsiPath = Join-Path $OutputDir "RemoteTerminalCloudAgent.msi"
 
