@@ -9,10 +9,12 @@ This directory contains the first-pass Windows service and MSI scaffolding for t
 - Config path: `%ProgramData%\RemoteTerminalCloudAgent\config.json`
 - Logs path: `%ProgramData%\RemoteTerminalCloudAgent\logs`
 
+The MSI now installs the Windows service via standard WiX `ServiceInstall` / `ServiceControl` tables instead of launching PowerShell custom actions during install.
+
 ## Files
 
-- `install-service.ps1` — installs and starts the Windows service via WinSW
-- `uninstall-service.ps1` — stops and removes the Windows service via WinSW
+- `install-service.ps1` — manual install helper for non-MSI scenarios
+- `uninstall-service.ps1` — manual uninstall helper for non-MSI scenarios
 - `RemoteTerminalCloudAgentService.xml` — WinSW service definition
 - `download-winsw.ps1` — fetches a WinSW executable for packaging or staging
 - `wix/RemoteTerminalCloudAgent.wxs` — WiX v4 MSI authoring skeleton

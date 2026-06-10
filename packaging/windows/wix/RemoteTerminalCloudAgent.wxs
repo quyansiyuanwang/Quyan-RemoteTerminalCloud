@@ -13,50 +13,62 @@
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent" />
+      <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent">
+        <Directory Id="SERVICEFOLDER" Name="service" />
+      </Directory>
     </StandardDirectory>
 
     <StandardDirectory Id="CommonAppDataFolder">
-      <Directory Id="PROGRAMDATA_AGENT" Name="RemoteTerminalCloudAgent" />
+      <Directory Id="PROGRAMDATA_AGENT" Name="RemoteTerminalCloudAgent">
+        <Directory Id="PROGRAMDATA_AGENT_LOGS" Name="logs" />
+      </Directory>
     </StandardDirectory>
 
     <Feature Id="MainFeature" Title="Remote Terminal Cloud Agent" Level="1">
       <ComponentGroupRef Id="AgentFiles" />
       <ComponentRef Id="ProgramDataDirectoryComponent" />
+      <ComponentRef Id="ProgramDataConfigComponent" />
+      <ComponentRef Id="ProgramDataLogsDirectoryComponent" />
+      <ComponentRef Id="ServiceWrapperComponent" />
     </Feature>
-
-    <InstallExecuteSequence>
-      <Custom Action="InstallAgentService" After="InstallFiles" Condition="NOT REMOVE" />
-      <Custom Action="UninstallAgentService" Before="RemoveFiles" Condition="REMOVE='ALL'" />
-    </InstallExecuteSequence>
-    <CustomAction
-      Id="InstallAgentService"
-      Directory="INSTALLFOLDER"
-      Execute="deferred"
-      ExeCommand="powershell.exe -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]packaging\windows\install-service.ps1&quot;"
-      Return="check"
-      Impersonate="no" />
-
-    <CustomAction
-      Id="UninstallAgentService"
-      Directory="INSTALLFOLDER"
-      Execute="deferred"
-      ExeCommand="powershell.exe -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]packaging\windows\uninstall-service.ps1&quot;"
-      Return="ignore"
-      Impersonate="no" />
 
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.AgentBuildRoot)\dist\**" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\agent.config.json" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" />
-      <Files Include="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
       <Files Include="$(var.AgentBuildRoot)\runtime\node.exe" />
     </ComponentGroup>
 
     <Component Id="ProgramDataDirectoryComponent" Directory="PROGRAMDATA_AGENT" Guid="E5D1A49D-ED8A-43E6-B70A-171D362BF04D">
       <CreateFolder />
+    </Component>
+
+    <Component Id="ProgramDataConfigComponent" Directory="PROGRAMDATA_AGENT" Guid="A0DF38D1-6925-4553-8E83-4C6774B664A7">
+      <File Id="ProgramDataConfigFile" Source="$(var.AgentBuildRoot)\packaging\windows\agent.config.json" Name="config.json" KeyPath="yes" />
+    </Component>
+
+    <Component Id="ProgramDataLogsDirectoryComponent" Directory="PROGRAMDATA_AGENT_LOGS" Guid="2D4D1C5C-111D-4F93-B680-85BA6C4CE355">
+      <CreateFolder />
+    </Component>
+
+    <Component Id="ServiceWrapperComponent" Directory="SERVICEFOLDER" Guid="A9D91CF9-43F6-4227-934B-988D53A4887D">
+      <File Id="RemoteTerminalCloudAgentServiceExe" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" KeyPath="yes" />
+      <File Id="RemoteTerminalCloudAgentServiceXml" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
+      <ServiceInstall
+        Id="RemoteTerminalCloudAgentServiceInstaller"
+        Name="RemoteTerminalCloudAgent"
+        DisplayName="Remote Terminal Cloud Agent"
+        Description="Outbound remote terminal agent service."
+        Start="auto"
+        Type="ownProcess"
+        ErrorControl="normal" />
+      <ServiceControl
+        Id="RemoteTerminalCloudAgentServiceControl"
+        Name="RemoteTerminalCloudAgent"
+        Start="install"
+        Stop="both"
+        Remove="uninstall"
+        Wait="yes" />
     </Component>
   </Package>
 </Wix>
