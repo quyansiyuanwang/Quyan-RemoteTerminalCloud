@@ -98,9 +98,19 @@ jobs:
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
         run: pnpm build:artifact
 
-      - name: Install WiX
+      - name: Setup .NET SDK
         if: matrix.target_platform == 'win32'
-        uses: wixtoolset/setup-wix@v1
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install WiX CLI
+        if: matrix.target_platform == 'win32'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 6.*
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          wix --version
 
       - name: Prepare Windows MSI stage
         if: matrix.target_platform == 'win32'
