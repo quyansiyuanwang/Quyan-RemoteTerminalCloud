@@ -13,7 +13,6 @@ $AgentBuildRoot = [System.IO.Path]::GetFullPath($AgentBuildRoot)
 $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 
 $WixFile = Join-Path $PSScriptRoot "RemoteTerminalCloudAgent.wxs"
-$WixUiFile = Join-Path $PSScriptRoot "AgentConfigDlg.wxs"
 $WixCommand = Get-Command wix.exe -ErrorAction SilentlyContinue
 
 foreach ($RequiredPath in @(
@@ -81,7 +80,6 @@ $WixArguments += @(
   "-ext", "WixToolset.UI.wixext",
   "-d", "AgentBuildRoot=$AgentBuildRoot",
   $WixFile,
-  $WixUiFile,
   "-out", $MsiPath
 )
 

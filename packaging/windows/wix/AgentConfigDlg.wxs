@@ -18,22 +18,21 @@
 
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="248" Width="56" Height="17" Text="&amp;Back">
-          <Publish Event="NewDialog" Value="LicenseAgreementDlg" />
+          <Publish Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
         </Control>
         <Control Id="Next" Type="PushButton" X="236" Y="248" Width="56" Height="17" Default="yes" Text="&amp;Next"
                  DisableCondition='RTC_SERVER_URL = ""' EnableCondition='RTC_SERVER_URL &lt;&gt; ""'>
-          <Publish Event="NewDialog" Value="VerifyReadyDlg" Condition='RTC_SERVER_URL &lt;&gt; ""' />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg"><![CDATA[RTC_SERVER_URL <> ""]]></Publish>
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="248" Width="56" Height="17" Cancel="yes" Text="Cancel">
-          <Publish Event="SpawnDialog" Value="CancelDlg" />
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
         </Control>
       </Dialog>
 
-      <!-- Wire AgentConfigDlg into WixUI_Minimal's flow (declared once in the Package file) -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog"
-               Value="AgentConfigDlg" Condition='LicenseAccepted = "1"' Order="2" />
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog"
-               Value="AgentConfigDlg" Condition="NOT Installed" Order="2" />
+      <!-- Redirect LicenseAgreementDlg Next → AgentConfigDlg (Order=2 fires after the default Order=1 that goes to VerifyReadyDlg, overriding it) -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="AgentConfigDlg" Order="2">LicenseAccepted = "1"</Publish>
+      <!-- Redirect VerifyReadyDlg Back → AgentConfigDlg on fresh install -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="AgentConfigDlg" Order="2">NOT Installed</Publish>
     </UI>
   </Fragment>
 </Wix>
