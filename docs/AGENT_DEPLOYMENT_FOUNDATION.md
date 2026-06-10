@@ -9,10 +9,10 @@ The repository now includes:
 - config-file based runtime configuration
 - Windows service installation scripts via WinSW skeleton
 - Windows WiX MSI authoring skeleton
-- Windows MSI staging builder that assembles `dist/`, `runtime/`, `service/`, and `packaging/windows/`
+- Windows MSI staging builder that assembles `bin/`, `service/`, and `packaging/windows/`
 - Linux `systemd` unit, install/uninstall scripts, and `deb` packaging builder
 - macOS `launchd` plist, install/uninstall scripts, and `pkg` packaging builder
-- a release-bundle builder that assembles `dist/` and `packaging/`
+- a release-bundle builder that assembles `bin/`, source snapshots, and `packaging/`
 - a GitHub Actions multi-platform build workflow for Linux/macOS/Windows artifacts
 
 The repository still does **not** include finished:
@@ -25,7 +25,7 @@ The repository still does **not** include finished:
 
 Run from `Products/remote-terminal-cloud/`:
 
-- `pnpm build:bundle`
+- `go run ./cmd/rtc-release bundle`
 
 Output:
 
@@ -33,8 +33,8 @@ Output:
 
 Bundle contents:
 
-- `dist/` — compiled agent
-- `src/` — source snapshot for inspection/debugging
+- `bin/` — compiled Go agent binary
+- `cmd/` / `internal/` — source snapshot for inspection/debugging
 - `packaging/` — platform service templates
 - `artifacts/windows/` — Windows MSI/service packaging handoff files
 - `artifacts/<platform>/` — downstream installer placeholders for each platform
@@ -42,8 +42,8 @@ Bundle contents:
 Windows MSI flow:
 
 1. Create the release bundle.
-2. Run `packaging/windows/wix/prepare-msi-stage.ps1` with the bundle root plus a Windows Node runtime directory.
-3. The script downloads WinSW, creates `service/RemoteTerminalCloudAgentService.exe`, copies `RemoteTerminalCloudAgentService.xml`, and copies the Node runtime into `runtime/`.
+2. Run `packaging/windows/wix/prepare-msi-stage.ps1` with the bundle root.
+3. The script downloads WinSW, creates `service/RemoteTerminalCloudAgentService.exe`, copies `RemoteTerminalCloudAgentService.xml`, and copies `bin/rtc-agent.exe`.
 4. Run `packaging/windows/wix/build-msi.ps1` against the generated `artifacts/windows/msi-build-root/`.
 5. For WiX 7 CLI, pass `-AcceptEula` or accept the EULA separately before building.
 
@@ -64,7 +64,7 @@ Current CI outputs:
 Release automation rules:
 
 - tag pattern: `v*`
-- tag/version validation: `github.ref_name` must equal `v${package.json version}`
+- tag/version validation: `github.ref_name` must equal `v${VERSION}`
 - prerelease detection: any tag containing `-` is published as a prerelease
 
 The CI pipeline now publishes GitHub Releases automatically for version tags, but it still does not add signing, notarization, or external distribution publishing.
@@ -79,13 +79,17 @@ The agent reads configuration in this order:
 
 Supported JSON keys:
 
-- `serverBaseUrl`
 - `registrationToken`
 - `runHeartbeat`
 - `runTunnel`
 - `defaultShellType`
 - `enabledShellTypes`
 - `preferencesFilePath`
+
+Built-in server targets:
+
+- local development runs (`go run ./cmd/rtc-agent`): `http://localhost:10001`
+- packaged release binaries (`go run ./cmd/rtc-release build|bundle|artifact`): `https://api.qysyw.cn`
 
 Default config file paths:
 

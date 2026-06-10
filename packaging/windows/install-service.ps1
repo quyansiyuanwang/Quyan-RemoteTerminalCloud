@@ -2,15 +2,14 @@ $ServiceName = "RemoteTerminalCloudAgent"
 $DisplayName = "Remote Terminal Cloud Agent"
 # $PSScriptRoot can be empty when invoked via nsExec in NSIS; fall back to MyInvocation.
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-if (Test-Path (Join-Path $ScriptDir "runtime\node.exe")) {
+if (Test-Path (Join-Path $ScriptDir "bin\rtc-agent.exe")) {
   $InstallRoot = $ScriptDir
-} elseif (Test-Path (Join-Path $ScriptDir "..\..\runtime\node.exe")) {
+} elseif (Test-Path (Join-Path $ScriptDir "..\..\bin\rtc-agent.exe")) {
   $InstallRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 } else {
   throw "Cannot locate install root from $ScriptDir"
 }
-$NodeExe = Join-Path $InstallRoot "runtime\node.exe"
-$AgentEntry = Join-Path $InstallRoot "dist\index.js"
+$AgentExe = Join-Path $InstallRoot "bin\rtc-agent.exe"
 $WinSWExe = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.exe"
 $WinSWXml = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.xml"
 $ConfigDir = Join-Path $env:ProgramData "RemoteTerminalCloudAgent"
@@ -31,12 +30,8 @@ if (-not (Test-Path $ConfigFile)) {
   Copy-Item (Join-Path $PSScriptRoot "agent.config.json") $ConfigFile
 }
 
-if (-not (Test-Path $NodeExe)) {
-  throw "Node runtime not found at $NodeExe"
-}
-
-if (-not (Test-Path $AgentEntry)) {
-  throw "Agent entry not found at $AgentEntry"
+if (-not (Test-Path $AgentExe)) {
+  throw "Agent executable not found at $AgentExe"
 }
 
 if (-not (Test-Path $WinSWExe)) {

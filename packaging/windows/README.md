@@ -9,7 +9,7 @@ This directory contains the first-pass Windows service and MSI scaffolding for t
 - Config path: `%ProgramData%\RemoteTerminalCloudAgent\config.json`
 - Logs path: `%ProgramData%\RemoteTerminalCloudAgent\logs`
 
-The default `config.json` template is intentionally written with empty `serverBaseUrl` and `registrationToken` values. Until these are configured, the service will stay installed and keep retrying instead of terminating immediately.
+The default `config.json` template only leaves `registrationToken` empty. The agent server address is now built into the binary: local development runs connect to `http://localhost:10001`, while packaged release builds connect to `https://api.qysyw.cn`. Until a token is configured, the service will stay installed and keep retrying instead of terminating immediately.
 
 The MSI now installs the Windows service via standard WiX `ServiceInstall` / `ServiceControl` tables instead of launching PowerShell custom actions during install.
 
@@ -25,9 +25,7 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 
 ## WiX build-root layout
 
-- `dist/` — compiled agent
-- `runtime/` — extracted Windows Node runtime directory
-- `runtime/node.exe` — bundled Node runtime entry used by the service
+- `bin/rtc-agent.exe` — compiled agent binary
 - `service/RemoteTerminalCloudAgentService.exe` — WinSW binary
 - `service/RemoteTerminalCloudAgentService.xml` — WinSW config
 - `packaging/windows/` — support scripts used by install/uninstall
@@ -35,30 +33,13 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 
 The WiX authoring expects `AgentBuildRoot` to follow this layout exactly.
 
-## Runtime structure
-
-`runtime/` should contain the full extracted Windows Node runtime that matches the target architecture.
-
-Minimum expected file:
-
-- `runtime/node.exe`
-
-Recommended approach:
-
-1. Download an official Windows Node.js zip for the target architecture.
-2. Extract it.
-3. Pass the extracted directory to `wix/prepare-msi-stage.ps1` with `-NodeRuntimeRoot`.
-
-The staging script copies that directory into `runtime/` automatically.
-
 ## Build a real MSI
 
 1. Build the agent bundle.
 2. Run `wix/prepare-msi-stage.ps1` against the bundle root.
 3. The staging script will:
-   - copy `dist/`
+   - copy `bin/rtc-agent.exe`
    - copy `packaging/windows/`
-   - copy the Windows Node runtime into `runtime/`
    - download WinSW into `service/RemoteTerminalCloudAgentService.exe`
    - copy `RemoteTerminalCloudAgentService.xml` into `service/`
 4. Build MSI with WiX v4 using `wix/build-msi.ps1`.
@@ -70,7 +51,6 @@ Example:
 ```powershell
 powershell -ExecutionPolicy Bypass -File packaging\windows\wix\prepare-msi-stage.ps1 `
   -AgentBundleRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0" `
-  -NodeRuntimeRoot "D:\path\to\node-v22.x-win-x64" `
   -Force
 
 powershell -ExecutionPolicy Bypass -File packaging\windows\wix\build-msi.ps1 `

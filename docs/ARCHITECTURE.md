@@ -15,7 +15,9 @@
 
 ## Planned modules
 
-- `src/`：Agent 注册、心跳、隧道、会话执行、升级器
+- `cmd/rtc-agent/`：Agent 启动入口
+- `internal/agent/`：Agent 注册、心跳、隧道、会话执行、升级器
+- `internal/protocol/`：Agent 运行时共享协议类型
 - `NodeBackend/`：设备管理 API、注册令牌、会话网关、审计服务
 - `Frontend/`：设备列表、在线终端、会话列表、审计中心
 

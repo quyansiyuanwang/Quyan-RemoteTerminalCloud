@@ -1,7 +1,6 @@
 ; Remote Terminal Cloud Agent - NSIS Installer
 ; Build root layout (AgentBuildRoot):
-;   dist\**          - compiled agent
-;   runtime\node.exe - bundled Node runtime
+;   bin\rtc-agent.exe - compiled agent binary
 ;   service\RemoteTerminalCloudAgentService.exe
 ;   service\RemoteTerminalCloudAgentService.xml
 ;   packaging\windows\install-service.ps1
@@ -77,24 +76,24 @@ FunctionEnd
 Section "Main" SecMain
   SetOutPath "$INSTDIR"
 
-  File /r "${AGENT_BUILD_ROOT}\dist\*.*"
-  File "${AGENT_BUILD_ROOT}\runtime\node.exe"
+  SetOutPath "$INSTDIR\bin"
+  File "${AGENT_BUILD_ROOT}\bin\rtc-agent.exe"
+
+  SetOutPath "$INSTDIR"
   File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
 
   SetOutPath "$INSTDIR\service"
   File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.exe"
   File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.xml"
 
-  ; Write default config and patch token — done entirely via PowerShell to avoid
-  ; NSIS path-variable expansion issues with $COMMONAPPDATA on some Windows versions.
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -Command \
-    "$d=[System.Environment]::GetFolderPath(''CommonApplicationData'') + ''\RemoteTerminalCloudAgent''; \
-    New-Item -ItemType Directory -Force -Path $d | Out-Null; \
-    New-Item -ItemType Directory -Force -Path ($d+''\\logs'') | Out-Null; \
-    Copy-Item -Force ''$INSTDIR\agent.config.json'' ($d+''\\config.json'')"'
+  ; Initialize ProgramData config directory and copy default config
+  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\init-config.ps1"'
+
+  ; Patch config with user-supplied token
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -RegToken "$RegToken"'
 
   ; Install and start service

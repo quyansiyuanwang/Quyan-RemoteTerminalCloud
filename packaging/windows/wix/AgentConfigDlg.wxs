@@ -6,23 +6,19 @@
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="yes" Text="WixUI_Bmp_Banner" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Agent Configuration" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Enter the server address and registration token." />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="Enter the registration token for this device." />
 
-        <Control Id="ServerUrlLabel" Type="Text" X="25" Y="65" Width="320" Height="10" Text="&amp;Server URL:" />
-        <Control Id="ServerUrlEdit" Type="Edit" X="25" Y="77" Width="320" Height="18" Property="RTC_SERVER_URL" />
-
-        <Control Id="RegTokenLabel" Type="Text" X="25" Y="112" Width="320" Height="10" Text="Registration &amp;Token (optional):" />
-        <Control Id="RegTokenEdit" Type="Edit" X="25" Y="124" Width="320" Height="18" Property="RTC_REG_TOKEN" Password="yes" />
-        <Control Id="RegTokenHint" Type="Text" X="25" Y="145" Width="320" Height="18" Transparent="yes"
+        <Control Id="RegTokenLabel" Type="Text" X="25" Y="84" Width="320" Height="10" Text="Registration &amp;Token (optional):" />
+        <Control Id="RegTokenEdit" Type="Edit" X="25" Y="96" Width="320" Height="18" Property="RTC_REG_TOKEN" Password="yes" />
+        <Control Id="RegTokenHint" Type="Text" X="25" Y="117" Width="320" Height="18" Transparent="yes"
                  Text="{\WixUI_Font_Smaller}Obtain from your server's admin panel. Can be set later in config.json." />
 
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
         <Control Id="Back" Type="PushButton" X="180" Y="248" Width="56" Height="17" Text="&amp;Back">
           <Publish Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
         </Control>
-        <Control Id="Next" Type="PushButton" X="236" Y="248" Width="56" Height="17" Default="yes" Text="&amp;Next"
-                 DisableCondition='RTC_SERVER_URL = ""' EnableCondition='RTC_SERVER_URL &lt;&gt; ""'>
-          <Publish Event="NewDialog" Value="VerifyReadyDlg"><![CDATA[RTC_SERVER_URL <> ""]]></Publish>
+        <Control Id="Next" Type="PushButton" X="236" Y="248" Width="56" Height="17" Default="yes" Text="&amp;Next">
+          <Publish Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="248" Width="56" Height="17" Cancel="yes" Text="Cancel">
           <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>

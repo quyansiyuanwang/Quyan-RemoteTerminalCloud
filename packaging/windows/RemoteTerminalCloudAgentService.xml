@@ -2,8 +2,7 @@
   <id>RemoteTerminalCloudAgent</id>
   <name>Remote Terminal Cloud Agent</name>
   <description>Outbound remote terminal agent service.</description>
-  <executable>%BASE%\..\runtime\node.exe</executable>
-  <arguments>%BASE%\..\dist\index.js</arguments>
+  <executable>%BASE%\..\bin\rtc-agent.exe</executable>
   <workingdirectory>%BASE%\..</workingdirectory>
   <env name="RTC_CONFIG_FILE" value="%ProgramData%\RemoteTerminalCloudAgent\config.json" />
   <log mode="roll-by-size-time">

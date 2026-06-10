@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=/opt/remote-terminal-cloud-agent
 Environment=RTC_CONFIG_FILE=/etc/remote-terminal-cloud-agent/config.json
 EnvironmentFile=-/etc/remote-terminal-cloud-agent/agent.env
-ExecStart=/opt/remote-terminal-cloud-agent/runtime/node /opt/remote-terminal-cloud-agent/dist/index.js
+ExecStart=/opt/remote-terminal-cloud-agent/bin/rtc-agent
 Restart=always
 RestartSec=5
 User=remote-terminal-agent

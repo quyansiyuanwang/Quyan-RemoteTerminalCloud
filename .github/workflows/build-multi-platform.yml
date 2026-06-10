@@ -6,7 +6,7 @@ on:
       - main
       - master
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -28,21 +28,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Read package version
+      - name: Read VERSION
         id: version
-        run: echo "package_version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: echo "package_version=$(tr -d '\r\n' < VERSION)" >> "$GITHUB_OUTPUT"
 
-      - name: Validate tag matches package version
+      - name: Validate tag matches VERSION
         run: |
           expected_tag="v${{ steps.version.outputs.package_version }}"
           actual_tag="${{ github.ref_name }}"
           if [ "$actual_tag" != "$expected_tag" ]; then
-            echo "Tag $actual_tag does not match package.json version $expected_tag"
+            echo "Tag $actual_tag does not match VERSION $expected_tag"
             exit 1
           fi
 
@@ -78,28 +73,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          version: 10.33.0
+          go-version-file: go.mod
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm typecheck
+      - name: Build and test
+        run: |
+          go test ./...
 
       - name: Build platform artifact
         env:
           RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
-        run: pnpm build:artifact
+        run: go run ./cmd/rtc-release artifact
 
       - name: Install NSIS
         if: matrix.target_platform == 'win32'
@@ -111,8 +98,7 @@ jobs:
         run: |
           $bundle = Get-ChildItem -Path release -Directory | Where-Object { $_.Name -like 'remote-terminal-cloud-agent-*' } | Select-Object -First 1
           if (-not $bundle) { throw 'release bundle not found' }
-          $nodeExe = (Get-Command node).Source
-          powershell -ExecutionPolicy Bypass -File packaging/windows/nsis/prepare-installer-stage.ps1 -AgentBundleRoot $bundle.FullName -NodeRuntimeRoot $nodeExe -Force
+          powershell -ExecutionPolicy Bypass -File packaging/windows/nsis/prepare-installer-stage.ps1 -AgentBundleRoot $bundle.FullName -Force
 
       - name: Build Windows installer
         if: matrix.target_platform == 'win32'

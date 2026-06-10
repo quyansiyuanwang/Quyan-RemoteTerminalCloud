@@ -8,18 +8,17 @@ $ErrorActionPreference = "Stop"
 $AgentBuildRoot = [System.IO.Path]::GetFullPath($AgentBuildRoot)
 $OutputDir      = [System.IO.Path]::GetFullPath($OutputDir)
 
-# Resolve version from package.json if not provided
+# Resolve version from VERSION file if not provided
 if (-not $Version) {
-  $pkgJson = Join-Path $AgentBuildRoot "package.json"
-  if (Test-Path $pkgJson) {
-    $Version = (Get-Content $pkgJson -Raw | ConvertFrom-Json).version
+  $versionFile = Join-Path $AgentBuildRoot "VERSION"
+  if (Test-Path $versionFile) {
+    $Version = (Get-Content $versionFile -Raw).Trim()
   }
 }
 if (-not $Version) { $Version = "0.0.0" }
 
 foreach ($RequiredPath in @(
-  (Join-Path $AgentBuildRoot "dist"),
-  (Join-Path $AgentBuildRoot "runtime\node.exe"),
+  (Join-Path $AgentBuildRoot "bin\rtc-agent.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.xml"),
   (Join-Path $AgentBuildRoot "packaging\windows\install-service.ps1"),
@@ -39,24 +38,6 @@ if (-not $Makensis) {
 if (-not $Makensis) { throw "makensis.exe not found. Install NSIS and ensure it is on PATH." }
 
 if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir | Out-Null }
-
-# Read server URL from .env.production (repo root, two levels above packaging/windows/nsis)
-$ServerUrl = ""
-$EnvProd = Join-Path $PSScriptRoot "..\..\..\..\.env.production"
-if (Test-Path $EnvProd) {
-  Get-Content $EnvProd | Where-Object { $_ -match "^RTC_SERVER_BASE_URL\s*=\s*(.+)" } | ForEach-Object {
-    $ServerUrl = $Matches[1].Trim()
-  }
-}
-
-# Pre-write server URL into the staged config.json so the installer doesn't ask for it
-$configPath = Join-Path $AgentBuildRoot "packaging\windows\agent.config.json"
-if ($ServerUrl) {
-  $config = Get-Content $configPath -Raw | ConvertFrom-Json
-  $config.serverBaseUrl = $ServerUrl
-  $config | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
-  Write-Host "Embedded serverBaseUrl: $ServerUrl"
-}
 
 $NsiScript = Join-Path $PSScriptRoot "agent.nsi"
 

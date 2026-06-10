@@ -6,8 +6,7 @@
     <string>com.remote-terminal-cloud.agent</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Library/Application Support/RemoteTerminalCloudAgent/runtime/node</string>
-      <string>/Library/Application Support/RemoteTerminalCloudAgent/dist/index.js</string>
+      <string>/Library/Application Support/RemoteTerminalCloudAgent/bin/rtc-agent</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

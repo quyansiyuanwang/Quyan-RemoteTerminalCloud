@@ -59,7 +59,7 @@ Section: admin
 Priority: optional
 Architecture: ${PACKAGE_ARCH}
 Maintainer: Remote Terminal Cloud
-Description: Outbound remote terminal cloud agent with bundled Node.js runtime.
+Description: Outbound remote terminal cloud agent with bundled Go runtime binary.
 EOF
 
 cat > "${DEBIAN_ROOT}/conffiles" <<EOF

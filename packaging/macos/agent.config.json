@@ -1,5 +1,4 @@
 {
-  "serverBaseUrl": "",
   "registrationToken": "",
   "runHeartbeat": true,
   "runTunnel": true,
