@@ -8,6 +8,7 @@
     "build:protocol": "pnpm --filter @rtc/protocol build",
     "build": "pnpm build:protocol && tsc -p tsconfig.json",
     "build:bundle": "pnpm build && node scripts/build-release-bundle.mjs",
+    "build:artifact": "pnpm build:bundle && node scripts/package-platform-artifact.mjs",
     "build:agent:bundle": "pnpm build:bundle",
     "dev": "pnpm build:protocol && tsx src/index.ts",
     "dev:agent": "pnpm dev",

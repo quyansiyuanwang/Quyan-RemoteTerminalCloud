@@ -1,0 +1,100 @@
+name: Build Multi Platform
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            target_platform: linux
+            target_arch: x64
+            artifact_glob: release/artifacts/linux-x64/**
+          - name: macos-arm64
+            os: macos-14
+            target_platform: darwin
+            target_arch: arm64
+            artifact_glob: release/artifacts/darwin-arm64/**
+          - name: windows-x64
+            os: windows-latest
+            target_platform: win32
+            target_arch: x64
+            artifact_glob: release/artifacts/win32-x64/**
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build platform artifact
+        env:
+          RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
+          RTC_TARGET_ARCH: ${{ matrix.target_arch }}
+        run: pnpm build:artifact
+
+      - name: Install WiX
+        if: matrix.target_platform == 'win32'
+        uses: wixtoolset/setup-wix@v1
+
+      - name: Prepare Windows MSI stage
+        if: matrix.target_platform == 'win32'
+        shell: pwsh
+        run: |
+          $bundle = Get-ChildItem -Path release -Directory | Where-Object { $_.Name -like 'remote-terminal-cloud-agent-*' } | Select-Object -First 1
+          if (-not $bundle) { throw 'release bundle not found' }
+          $nodeExe = (Get-Command node).Source
+          powershell -ExecutionPolicy Bypass -File packaging/windows/wix/prepare-msi-stage.ps1 -AgentBundleRoot $bundle.FullName -NodeRuntimeRoot $nodeExe -Force
+
+      - name: Build Windows MSI
+        if: matrix.target_platform == 'win32'
+        shell: pwsh
+        run: |
+          $bundle = Get-ChildItem -Path release -Directory | Where-Object { $_.Name -like 'remote-terminal-cloud-agent-*' } | Select-Object -First 1
+          if (-not $bundle) { throw 'release bundle not found' }
+          $buildRoot = Join-Path $bundle.FullName 'artifacts\windows\msi-build-root'
+          $outDir = Join-Path $buildRoot 'artifacts\windows\out'
+          powershell -ExecutionPolicy Bypass -File packaging/windows/wix/build-msi.ps1 -AgentBuildRoot $buildRoot -OutputDir $outDir -AcceptEula
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+      - name: Upload Windows MSI
+        if: matrix.target_platform == 'win32'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: release/remote-terminal-cloud-agent-*/artifacts/windows/msi-build-root/artifacts/windows/out/*.msi
+          if-no-files-found: error

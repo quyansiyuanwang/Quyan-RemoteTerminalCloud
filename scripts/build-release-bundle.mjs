@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,9 +11,61 @@ const distRoot = path.join(projectRoot, "dist");
 const packagingRoot = path.join(projectRoot, "packaging");
 const packageJsonPath = path.join(projectRoot, "package.json");
 const windowsPackagingRoot = path.join(packagingRoot, "windows");
+const protocolDistRoot = path.join(projectRoot, "packages", "protocol", "dist");
+
+function getExecutable(command) {
+  if (process.platform !== "win32") {
+    return command;
+  }
+
+  if (command === "pnpm") {
+    return "pnpm.cmd";
+  }
+
+  return command;
+}
+
+function createCommandInvocation(command, args) {
+  if (process.platform === "win32" && command === "pnpm") {
+    const escaped = [command, ...args].map((part) => {
+      if (/\s|"/.test(part)) {
+        return `"${part.replaceAll('"', '\\"')}"`;
+      }
+
+      return part;
+    });
+
+    return {
+      file: "cmd.exe",
+      args: ["/d", "/s", "/c", escaped.join(" ")],
+    };
+  }
+
+  return {
+    file: getExecutable(command),
+    args,
+  };
+}
+
+function runCommand(command, args) {
+  const invocation = createCommandInvocation(command, args);
+  const result = spawnSync(invocation.file, invocation.args, {
+    cwd: projectRoot,
+    env: process.env,
+    stdio: "inherit",
+  });
+
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`);
+  }
+}
 
 if (!existsSync(distRoot)) {
   throw new Error("dist directory not found. Run the agent build before creating a release bundle.");
+}
+
+if (!existsSync(protocolDistRoot)) {
+  throw new Error("packages/protocol/dist directory not found. Run the protocol build before creating a release bundle.");
 }
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
@@ -24,22 +77,21 @@ mkdirSync(releaseRoot, { recursive: true });
 const bundleRoot = path.join(releaseRoot, `remote-terminal-cloud-agent-${releaseVersion}`);
 mkdirSync(bundleRoot, { recursive: true });
 
+runCommand("pnpm", ["--filter", "@rtc/agent", "deploy", "--legacy", "--prod", bundleRoot]);
+
 cpSync(distRoot, path.join(bundleRoot, "dist"), { recursive: true });
 cpSync(path.join(projectRoot, "src"), path.join(bundleRoot, "src"), { recursive: true });
 cpSync(packagingRoot, path.join(bundleRoot, "packaging"), { recursive: true });
+cpSync(protocolDistRoot, path.join(bundleRoot, "packages", "protocol", "dist"), { recursive: true });
 
 writeFileSync(
   path.join(bundleRoot, "package.json"),
   JSON.stringify(
     {
-      name: packageJson.name,
-      version: releaseVersion,
-      private: true,
-      main: packageJson.main,
+      ...JSON.parse(readFileSync(path.join(bundleRoot, "package.json"), "utf8")),
       scripts: {
         start: packageJson.scripts?.start,
       },
-      dependencies: packageJson.dependencies,
     },
     null,
     2,
@@ -53,7 +105,8 @@ writeFileSync(
     "",
     `Version: ${releaseVersion}`,
     "",
-    "This bundle is a packaging foundation, not a finished MSI/PKG/DEB/RPM installer.",
+    "This bundle contains the compiled agent plus production dependencies for downstream packaging.",
+    "It is still a packaging foundation, not a finished MSI/PKG/DEB/RPM installer.",
     "Use the files under packaging/ as templates for service installation and downstream platform packaging.",
   ].join("\n"),
 );

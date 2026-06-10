@@ -13,6 +13,7 @@ The repository now includes:
 - Linux `systemd` unit and install/uninstall script templates
 - macOS `launchd` plist and install/uninstall script templates
 - a release-bundle builder that assembles `dist/` and `packaging/`
+- a GitHub Actions multi-platform build workflow for Linux/macOS/Windows artifacts
 
 The repository still does **not** include finished:
 
@@ -48,6 +49,21 @@ Windows MSI flow:
 4. Run `packaging/windows/wix/build-msi.ps1` against the generated `artifacts/windows/msi-build-root/`.
 5. For WiX 7 CLI, pass `-AcceptEula` or accept the EULA separately before building.
 
+## CI artifacts
+
+Workflow file:
+
+- `.github/workflows/build-multi-platform.yml`
+
+Current CI outputs:
+
+- Linux: `release/artifacts/linux-x64/*.tar.gz`
+- macOS: `release/artifacts/darwin-arm64/*.tar.gz`
+- Windows: `release/artifacts/win32-x64/*.zip`
+- Windows MSI: `release/remote-terminal-cloud-agent-<version>/artifacts/windows/msi-build-root/artifacts/windows/out/*.msi`
+
+The CI pipeline currently focuses on build validation and packaging handoff artifacts. It does not yet add signing, notarization, or publish-to-release automation.
+
 ## Runtime configuration
 
 The agent reads configuration in this order:
@@ -78,8 +94,8 @@ Override config path with:
 
 ## Recommended next steps
 
-1. bundle a Windows Node runtime and WinSW binary into release assembly
-2. harden the validated WiX MSI flow on a Windows release runner
-3. add Linux post-install scripts for service user creation
-4. add macOS signing and notarization pipeline
-5. add CI matrix for Windows/macOS/Linux release artifacts
+1. add Linux post-install scripts for service user creation
+2. add macOS signing and notarization pipeline
+3. add release publishing, checksums, and provenance
+4. extend Linux/macOS packaging from archive handoff to real `deb`/`rpm`/`pkg`
+5. add code signing for Windows MSI and service binaries
