@@ -10,16 +10,14 @@ The repository now includes:
 - Windows service installation scripts via WinSW skeleton
 - Windows WiX MSI authoring skeleton
 - Windows MSI staging builder that assembles `dist/`, `runtime/`, `service/`, and `packaging/windows/`
-- Linux `systemd` unit and install/uninstall script templates
-- macOS `launchd` plist and install/uninstall script templates
+- Linux `systemd` unit, install/uninstall scripts, and `deb` packaging builder
+- macOS `launchd` plist, install/uninstall scripts, and `pkg` packaging builder
 - a release-bundle builder that assembles `dist/` and `packaging/`
 - a GitHub Actions multi-platform build workflow for Linux/macOS/Windows artifacts
 
 The repository still does **not** include finished:
 
-- fully built `msi` packaging output
-- `pkg` packaging
-- `deb`/`rpm` packaging
+- `rpm` packaging
 - code signing / notarization
 - auto-update delivery
 
@@ -57,8 +55,8 @@ Workflow file:
 
 Current CI outputs:
 
-- Linux: `release/artifacts/linux-x64/*.tar.gz`
-- macOS: `release/artifacts/darwin-arm64/*.tar.gz`
+- Linux: `release/artifacts/linux-x64/*.tar.gz` and `*.deb`
+- macOS: `release/artifacts/darwin-arm64/*.tar.gz` and `*.pkg`
 - Windows: `release/artifacts/win32-x64/*.zip`
 - Windows MSI: `release/remote-terminal-cloud-agent-<version>/artifacts/windows/msi-build-root/artifacts/windows/out/*.msi`
 - GitHub Release on `v*` tags: all archived assets above plus `SHA256SUMS.txt`
@@ -104,5 +102,5 @@ Override config path with:
 1. add Linux post-install scripts for service user creation
 2. add macOS signing and notarization pipeline
 3. add release publishing, checksums, and provenance
-4. extend Linux/macOS packaging from archive handoff to real `deb`/`rpm`/`pkg`
+4. extend Linux packaging from `deb` to `rpm`
 5. add code signing for Windows MSI and service binaries

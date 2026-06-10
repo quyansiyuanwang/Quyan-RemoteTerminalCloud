@@ -106,8 +106,7 @@ writeFileSync(
     `Version: ${releaseVersion}`,
     "",
     "This bundle contains the compiled agent plus production dependencies for downstream packaging.",
-    "It is still a packaging foundation, not a finished MSI/PKG/DEB/RPM installer.",
-    "Use the files under packaging/ as templates for service installation and downstream platform packaging.",
+    "Use the files under packaging/ and scripts/ to build downstream MSI/DEB/PKG installers or archive artifacts.",
   ].join("\n"),
 );
 

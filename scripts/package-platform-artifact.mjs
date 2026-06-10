@@ -92,11 +92,23 @@ function copyNodeRuntime() {
 }
 
 function writeManifest() {
+  const nativeInstallerFile =
+    targetPlatform === "linux"
+      ? `${archiveBaseName}.deb`
+      : targetPlatform === "darwin"
+        ? `${archiveBaseName}.pkg`
+        : null;
+
   const manifest = {
     generatedAt: new Date().toISOString(),
     version,
     targetPlatform,
     targetArch,
+    archiveFile:
+      targetPlatform === "win32"
+        ? `${archiveBaseName}.zip`
+        : `${archiveBaseName}.tar.gz`,
+    nativeInstallerFile,
     nodeRuntimeExecutable: targetPlatform === "win32" ? "runtime/node.exe" : "runtime/node",
     startCommand: targetPlatform === "win32"
       ? ".\\runtime\\node.exe .\\dist\\index.js"
@@ -112,6 +124,12 @@ function writeReadme() {
     : targetPlatform === "darwin"
       ? "Use packaging/macos/install-service.sh for launchd installation."
       : "Use packaging/linux/install-service.sh for systemd installation.";
+
+  const nativeInstallerHint = targetPlatform === "linux"
+    ? `A native Debian installer is also generated alongside this archive: ${archiveBaseName}.deb`
+    : targetPlatform === "darwin"
+      ? `A native macOS installer package is also generated alongside this archive: ${archiveBaseName}.pkg`
+      : null;
 
   writeFileSync(
     path.join(stageRoot, "README.txt"),
@@ -129,8 +147,42 @@ function writeReadme() {
       "- packaging/ platform service installation templates",
       "",
       installHint,
+      ...(nativeInstallerHint ? ["", nativeInstallerHint] : []),
     ].join("\n"),
   );
+}
+
+function buildNativeInstaller() {
+  if (targetPlatform === "linux") {
+    const debPath = path.join(platformOutputRoot, `${archiveBaseName}.deb`);
+    if (existsSync(debPath)) {
+      rmSync(debPath, { force: true });
+    }
+
+    runCommand("bash", [
+      path.join(stageRoot, "packaging", "linux", "build-deb.sh"),
+      stageRoot,
+      debPath,
+      version,
+      targetArch,
+    ]);
+    return;
+  }
+
+  if (targetPlatform === "darwin") {
+    const pkgPath = path.join(platformOutputRoot, `${archiveBaseName}.pkg`);
+    if (existsSync(pkgPath)) {
+      rmSync(pkgPath, { force: true });
+    }
+
+    runCommand("bash", [
+      path.join(stageRoot, "packaging", "macos", "build-pkg.sh"),
+      stageRoot,
+      pkgPath,
+      version,
+      targetArch,
+    ]);
+  }
 }
 
 function createArchive() {
@@ -173,5 +225,6 @@ copyNodeRuntime();
 writeManifest();
 writeReadme();
 createArchive();
+buildNativeInstaller();
 
 console.log(`[remote-terminal-cloud-agent] platform artifact created at ${platformOutputRoot}`);

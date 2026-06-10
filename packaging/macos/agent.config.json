@@ -1,0 +1,9 @@
+{
+  "serverBaseUrl": "https://your-domain.example.com",
+  "registrationToken": "replace-with-real-token",
+  "runHeartbeat": true,
+  "runTunnel": true,
+  "defaultShellType": "system-default",
+  "enabledShellTypes": ["system-default", "zsh", "sh", "bash", "pwsh"],
+  "preferencesFilePath": "/Library/Application Support/RemoteTerminalCloudAgent/preferences.json"
+}
