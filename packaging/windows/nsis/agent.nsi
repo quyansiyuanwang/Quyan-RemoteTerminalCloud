@@ -38,6 +38,7 @@ BrandingText "Remote Terminal Cloud Agent ${AGENT_VERSION}"
 ;--------------------------------
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
 Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
