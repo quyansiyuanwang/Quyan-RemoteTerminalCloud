@@ -13,6 +13,7 @@ $AgentBuildRoot = [System.IO.Path]::GetFullPath($AgentBuildRoot)
 $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 
 $WixFile = Join-Path $PSScriptRoot "RemoteTerminalCloudAgent.wxs"
+$WixCommand = Get-Command wix.exe -ErrorAction SilentlyContinue
 
 foreach ($RequiredPath in @(
   (Join-Path $AgentBuildRoot "dist"),
@@ -27,7 +28,7 @@ foreach ($RequiredPath in @(
   }
 }
 
-if (-not (Get-Command wix.exe -ErrorAction SilentlyContinue)) {
+if (-not $WixCommand) {
   throw "wix.exe not found. Install WiX Toolset CLI and ensure it is on PATH."
 }
 
@@ -46,7 +47,17 @@ $WixArguments = @(
 )
 
 if ($AcceptEula) {
-  $WixArguments += @("--acceptEula", "yes")
+  $WixVersionOutput = & $WixCommand.Source --version 2>$null
+  $WixVersionText = [string]::Join("`n", $WixVersionOutput)
+  $WixMajorVersion = 0
+
+  if ($WixVersionText -match "(\d+)\.") {
+    $WixMajorVersion = [int]$Matches[1]
+  }
+
+  if ($WixMajorVersion -ge 7) {
+    $WixArguments += @("--acceptEula", "yes")
+  }
 }
 
 $WixArguments += @(
@@ -57,7 +68,7 @@ $WixArguments += @(
   $MsiPath
 )
 
-& wix.exe @WixArguments
+& $WixCommand.Source @WixArguments
 
 if ($LASTEXITCODE -ne 0) {
   throw "wix build failed with exit code $LASTEXITCODE"

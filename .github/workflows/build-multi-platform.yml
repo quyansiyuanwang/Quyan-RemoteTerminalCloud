@@ -129,7 +129,7 @@ jobs:
           if (-not $bundle) { throw 'release bundle not found' }
           $buildRoot = Join-Path $bundle.FullName 'artifacts\windows\msi-build-root'
           $outDir = Join-Path $buildRoot 'artifacts\windows\out'
-          powershell -ExecutionPolicy Bypass -File packaging/windows/wix/build-msi.ps1 -AgentBuildRoot $buildRoot -OutputDir $outDir -AcceptEula
+          powershell -ExecutionPolicy Bypass -File packaging/windows/wix/build-msi.ps1 -AgentBuildRoot $buildRoot -OutputDir $outDir
 
       - name: Upload platform artifact
         uses: actions/upload-artifact@v4

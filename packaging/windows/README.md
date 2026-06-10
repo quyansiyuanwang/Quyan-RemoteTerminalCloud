@@ -59,7 +59,7 @@ The staging script copies that directory into `runtime/` automatically.
    - copy `RemoteTerminalCloudAgentService.xml` into `service/`
 4. Build MSI with WiX v4 using `wix/build-msi.ps1`.
 
-If you are using WiX 7 CLI, add `-AcceptEula` to the build step.
+If you are using WiX 7 CLI, `build-msi.ps1 -AcceptEula` will forward the required EULA flag automatically. This flag is not needed for WiX 6.
 
 Example:
 
@@ -71,6 +71,5 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\wix\prepare-msi-stage
 
 powershell -ExecutionPolicy Bypass -File packaging\windows\wix\build-msi.ps1 `
   -AgentBuildRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root" `
-  -OutputDir "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root\artifacts\windows\out" `
-  -AcceptEula
+  -OutputDir "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root\artifacts\windows\out"
 ```
