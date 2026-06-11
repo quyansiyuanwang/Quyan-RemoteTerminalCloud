@@ -98,7 +98,7 @@ jobs:
         run: |
           $bundle = Get-ChildItem -Path release -Directory | Where-Object { $_.Name -like 'remote-terminal-cloud-agent-*' } | Select-Object -First 1
           if (-not $bundle) { throw 'release bundle not found' }
-          powershell -ExecutionPolicy Bypass -File packaging/windows/nsis/prepare-installer-stage.ps1 -AgentBundleRoot $bundle.FullName -Force
+          & ".\packaging\windows\nsis\prepare-installer-stage.ps1" -AgentBundleRoot $bundle.FullName -Force
 
       - name: Build Windows installer
         if: matrix.target_platform == 'win32'
@@ -107,7 +107,7 @@ jobs:
           $bundle = Get-ChildItem -Path release -Directory | Where-Object { $_.Name -like 'remote-terminal-cloud-agent-*' } | Select-Object -First 1
           if (-not $bundle) { throw 'release bundle not found' }
           $buildRoot = Join-Path $bundle.FullName 'artifacts\windows\installer-build-root'
-          powershell -ExecutionPolicy Bypass -File packaging/windows/nsis/build-installer.ps1 -AgentBuildRoot $buildRoot
+          & ".\packaging\windows\nsis\build-installer.ps1" -AgentBuildRoot $buildRoot
 
       - name: Upload platform archive
         uses: actions/upload-artifact@v4

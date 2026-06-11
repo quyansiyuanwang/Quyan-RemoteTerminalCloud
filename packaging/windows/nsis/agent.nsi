@@ -1,13 +1,9 @@
 ; Remote Terminal Cloud Agent - NSIS Installer
 ; Build root layout (AgentBuildRoot):
 ;   bin\rtc-agent.exe - compiled agent binary
+;   bin\rtc-agent-installer.exe - native installer helper
 ;   service\RemoteTerminalCloudAgentService.exe
 ;   service\RemoteTerminalCloudAgentService.xml
-;   packaging\windows\install-service.ps1
-;   packaging\windows\uninstall-service.ps1
-;   packaging\windows\stop-service.ps1
-;   packaging\windows\manage-agent.ps1
-;   packaging\windows\write-config.ps1
 ;   packaging\windows\agent.config.json
 
 Unicode true
@@ -80,22 +76,17 @@ FunctionEnd
 ;--------------------------------
 Section "Main" SecMain
   InitPluginsDir
-  File /oname=$PLUGINSDIR\stop-service.ps1 "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-service.ps1" -InstallRoot "$INSTDIR"'
+  File /oname=$PLUGINSDIR\rtc-agent-installer.exe "${AGENT_BUILD_ROOT}\bin\rtc-agent-installer.exe"
+  nsExec::ExecToLog '"$PLUGINSDIR\rtc-agent-installer.exe" windows stop-service "$INSTDIR"'
 
   SetOutPath "$INSTDIR"
 
   SetOutPath "$INSTDIR\bin"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent.exe"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent-manager.exe"
+  File "${AGENT_BUILD_ROOT}\bin\rtc-agent-installer.exe"
 
   SetOutPath "$INSTDIR"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
 
   SetOutPath "$INSTDIR\service"
@@ -103,20 +94,22 @@ Section "Main" SecMain
   File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.xml"
 
   ; Initialize ProgramData config directory and copy default config
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\init-config.ps1"'
+  nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows init-config'
 
   ; Patch config with user-supplied token
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\write-config.ps1" -RegToken "$RegToken"'
+  ${If} $RegToken != ""
+    nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows save-token "$RegToken"'
+  ${EndIf}
 
   ; Install and start service
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\install-service.ps1"'
+  nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows install-service "$INSTDIR" "$RegToken"'
 
   StrCpy $StartMenuFolder "$SMPROGRAMS\Remote Terminal Cloud Agent"
   CreateDirectory "$StartMenuFolder"
   CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$INSTDIR\bin\rtc-agent-manager.exe" "" "$INSTDIR\bin\rtc-agent-manager.exe"
-  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-NoExit -ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" configure' "$INSTDIR\bin\rtc-agent.exe"
-  CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-config-dir' "$INSTDIR\bin\rtc-agent.exe"
-  CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-logs' "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$INSTDIR\bin\rtc-agent-manager.exe" "" "$INSTDIR\bin\rtc-agent-manager.exe"
+  CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$INSTDIR\bin\rtc-agent-installer.exe" 'windows open-config-dir' "$INSTDIR\bin\rtc-agent-installer.exe"
+  CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$INSTDIR\bin\rtc-agent-installer.exe" 'windows open-logs' "$INSTDIR\bin\rtc-agent-installer.exe"
 
   ; Uninstaller + registry
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -131,7 +124,7 @@ SectionEnd
 ; Uninstall
 ;--------------------------------
 Section "Uninstall"
-  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\uninstall-service.ps1"'
+  nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows uninstall-service "$INSTDIR"'
   RMDir /r "$SMPROGRAMS\Remote Terminal Cloud Agent"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\RemoteTerminalCloudAgent"

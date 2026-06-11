@@ -11,6 +11,7 @@
 ## Structure
 
 - `cmd/rtc-agent/` — Agent 启动入口
+- `cmd/rtc-agent-installer/` — Windows 原生安装/服务管理入口
 - `cmd/rtc-release/` — 发布目录与平台制品构建入口
 - `internal/agent/` — Agent 运行时主逻辑
 - `internal/protocol/` — Agent 内部共享协议类型
@@ -81,6 +82,7 @@ go run ./cmd/rtc-agent shells
 ```
 
 Windows 安装版建议直接使用开始菜单中的 `Remote Terminal Cloud Agent` 管理入口，不必手动进入安装目录找 `bin\rtc-agent.exe`。
+Windows 安装与服务逻辑现在优先走原生 Go 二进制，而不是把核心行为放在 PowerShell 脚本中。
 
 ## Build
 

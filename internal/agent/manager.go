@@ -210,20 +210,5 @@ func detectServiceState() string {
 	if runtime.GOOS != "windows" {
 		return "unsupported"
 	}
-
-	cmd := exec.Command("sc.exe", "query", "RemoteTerminalCloudAgent")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "not installed"
-	}
-
-	text := string(output)
-	switch {
-	case strings.Contains(text, "RUNNING"):
-		return "Running"
-	case strings.Contains(text, "STOPPED"):
-		return "Stopped"
-	default:
-		return "Unknown"
-	}
+	return DetectWindowsServiceState()
 }

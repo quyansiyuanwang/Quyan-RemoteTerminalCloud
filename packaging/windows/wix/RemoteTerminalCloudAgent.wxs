@@ -75,12 +75,7 @@
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent.exe" />
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-manager.exe" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\stop-service.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\manage-agent.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\write-config.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\init-config.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-installer.exe" />
     </ComponentGroup>
 
     <Component Id="ProgramDataDirectoryComponent" Directory="PROGRAMDATA_AGENT" Guid="E5D1A49D-ED8A-43E6-B70A-171D362BF04D">
@@ -107,48 +102,42 @@
         WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="ConfigureAgentShortcut"
         Name="Configure Agent"
-        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-        Arguments='-NoExit -ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" configure'
+        Target="[INSTALLFOLDER]bin\rtc-agent-manager.exe"
         WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="OpenConfigDirShortcut"
         Name="Open Config Folder"
-        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" open-config-dir'
+        Target="[INSTALLFOLDER]bin\rtc-agent-installer.exe"
+        Arguments='windows open-config-dir'
         WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="OpenLogsShortcut"
         Name="Open Logs"
-        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" open-logs'
+        Target="[INSTALLFOLDER]bin\rtc-agent-installer.exe"
+        Arguments='windows open-logs'
         WorkingDirectory="INSTALLFOLDER" />
       <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
       <RegistryValue Root="HKLM" Key="Software\RemoteTerminalCloudAgent" Name="StartMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <!--
-      SetProperty passes RTC_REG_TOKEN as CustomActionData to the deferred WriteConfig action.
-    -->
-    <SetProperty Id="WriteConfig" Value="[RTC_REG_TOKEN]"
-                 Before="WriteConfig" Sequence="execute" />
-    <CustomAction Id="WriteConfig" Directory="PROGRAMDATA_AGENT"
-      Execute="deferred" Impersonate="no" Return="check"
-      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]write-config.ps1&quot;" />
-
     <CustomAction Id="StopExistingService" Directory="INSTALLFOLDER"
       Execute="deferred" Impersonate="no" Return="ignore"
-      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]stop-service.ps1&quot; -InstallRoot &quot;[INSTALLFOLDER]&quot;" />
+      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows stop-service &quot;[INSTALLFOLDER]&quot;" />
 
     <CustomAction Id="InstallService" Directory="INSTALLFOLDER"
       Execute="deferred" Impersonate="no" Return="check"
-      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install-service.ps1&quot;" />
+      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows install-service &quot;[INSTALLFOLDER]&quot; &quot;[RTC_REG_TOKEN]&quot;" />
 
     <CustomAction Id="UninstallService" Directory="INSTALLFOLDER"
       Execute="deferred" Impersonate="no" Return="ignore"
-      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]uninstall-service.ps1&quot;" />
+      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows uninstall-service &quot;[INSTALLFOLDER]&quot;" />
+
+    <CustomAction Id="InitConfig" Directory="INSTALLFOLDER"
+      Execute="deferred" Impersonate="no" Return="check"
+      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows init-config" />
 
     <InstallExecuteSequence>
       <Custom Action="StopExistingService" Before="InstallFiles">Installed</Custom>
-      <Custom Action="WriteConfig" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="InstallService" After="WriteConfig">NOT Installed</Custom>
+      <Custom Action="InitConfig" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="InstallService" After="InitConfig">NOT Installed</Custom>
       <Custom Action="UninstallService" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
     </InstallExecuteSequence>
 

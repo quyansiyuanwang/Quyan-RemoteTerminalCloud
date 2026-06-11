@@ -30,6 +30,7 @@ type releaseConfig struct {
 	goarch          string
 	agentBinaryName string
 	managerBinaryName string
+	installerBinaryName string
 	releaseRoot     string
 	bundleRoot      string
 	platformOutRoot string
@@ -98,9 +99,11 @@ func newReleaseConfig(root string) releaseConfig {
 
 	agentBinaryName := "rtc-agent"
 	managerBinaryName := "rtc-agent-manager"
+	installerBinaryName := "rtc-agent-installer"
 	if targetPlatform == "win32" {
 		agentBinaryName += ".exe"
 		managerBinaryName += ".exe"
+		installerBinaryName += ".exe"
 	}
 
 	releaseRoot := filepath.Join(root, "release")
@@ -118,6 +121,7 @@ func newReleaseConfig(root string) releaseConfig {
 		goarch:          goarch,
 		agentBinaryName: agentBinaryName,
 		managerBinaryName: managerBinaryName,
+		installerBinaryName: installerBinaryName,
 		releaseRoot:     releaseRoot,
 		bundleRoot:      bundleRoot,
 		platformOutRoot: platformOutRoot,
@@ -140,6 +144,7 @@ func buildBinary(cfg releaseConfig) error {
 	}{
 		{outputPath: filepath.Join(outputDir, cfg.agentBinaryName), packagePath: "./cmd/rtc-agent"},
 		{outputPath: filepath.Join(outputDir, cfg.managerBinaryName), packagePath: "./cmd/rtc-agent-manager", guiBinary: cfg.goos == "windows"},
+		{outputPath: filepath.Join(outputDir, cfg.installerBinaryName), packagePath: "./cmd/rtc-agent-installer"},
 	} {
 		targetLdflags := ldflags
 		if target.guiBinary {
@@ -186,6 +191,10 @@ func buildBundle(cfg releaseConfig) error {
 	if err := copyFile(sourceManagerBinary, filepath.Join(cfg.bundleRoot, "bin", cfg.managerBinaryName)); err != nil {
 		return err
 	}
+	sourceInstallerBinary := filepath.Join(cfg.projectRoot, "build", "bin", fmt.Sprintf("%s-%s", cfg.targetPlatform, cfg.targetArch), cfg.installerBinaryName)
+	if err := copyFile(sourceInstallerBinary, filepath.Join(cfg.bundleRoot, "bin", cfg.installerBinaryName)); err != nil {
+		return err
+	}
 
 	for _, dir := range []string{"cmd", "internal", "packaging", "docs"} {
 		if err := copyTree(filepath.Join(cfg.projectRoot, dir), filepath.Join(cfg.bundleRoot, dir)); err != nil {
@@ -208,6 +217,7 @@ func buildBundle(cfg releaseConfig) error {
 		"version": cfg.version,
 		"binary":  filepath.ToSlash(filepath.Join("bin", cfg.agentBinaryName)),
 		"managerBinary": filepath.ToSlash(filepath.Join("bin", cfg.managerBinaryName)),
+		"installerBinary": filepath.ToSlash(filepath.Join("bin", cfg.installerBinaryName)),
 	})
 }
 
@@ -238,6 +248,7 @@ func buildArtifact(cfg releaseConfig) error {
 		"nativeInstallerFile": nativeInstallerFileName(cfg),
 		"binaryPath":          filepath.ToSlash(filepath.Join("bin", cfg.agentBinaryName)),
 		"managerBinaryPath":   filepath.ToSlash(filepath.Join("bin", cfg.managerBinaryName)),
+		"installerBinaryPath": filepath.ToSlash(filepath.Join("bin", cfg.installerBinaryName)),
 		"startCommand":        startCommand(cfg),
 	}); err != nil {
 		return err

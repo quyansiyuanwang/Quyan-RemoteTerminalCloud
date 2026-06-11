@@ -49,6 +49,8 @@ func handleCommand(args []string) (bool, error) {
 	switch command {
 	case "configure", "conf":
 		return true, runConfigureCommand()
+	case "service":
+		return true, runServiceCommand(rest)
 	case "version", "ver":
 		return true, runVersionCommand()
 	case "paths", "path":
@@ -98,6 +100,40 @@ func runConfigureCommand() error {
 
 	fmt.Println("[remote-terminal-cloud-agent] configuration updated successfully.")
 	return nil
+}
+
+func runServiceCommand(args []string) error {
+	if len(args) == 0 {
+		printCommandHelp("service")
+		return nil
+	}
+
+	action := strings.ToLower(strings.TrimSpace(args[0]))
+	switch action {
+	case "install":
+		token := ""
+		if len(args) > 1 {
+			token = strings.TrimSpace(args[1])
+		}
+		return agent.InstallWindowsService("", token)
+	case "uninstall":
+		return agent.UninstallWindowsService("")
+	case "start":
+		return agent.StartWindowsService()
+	case "stop":
+		return agent.StopWindowsService("")
+	case "restart":
+		return agent.RestartWindowsService("")
+	case "init-config":
+		return agent.EnsureManagedConfigFile()
+	case "save-token":
+		if len(args) < 2 {
+			return fmt.Errorf("service save-token requires a token value")
+		}
+		return agent.SaveManagedRegistrationToken(args[1])
+	default:
+		return fmt.Errorf("unknown service action: %s", action)
+	}
 }
 
 func runVersionCommand() error {
@@ -239,6 +275,7 @@ func printHelp(args []string) {
 	fmt.Println("")
 	fmt.Println("Commands:")
 	fmt.Println("  configure, conf             Prompt for and save the registration token")
+	fmt.Println("  service                     Run native service/install management actions")
 	fmt.Println("  version, ver                Show agent version and server base URL")
 	fmt.Println("  paths, path                 Show config, preferences, and working paths")
 	fmt.Println("  config                      Show effective runtime configuration")
@@ -249,6 +286,7 @@ func printHelp(args []string) {
 	fmt.Println("")
 	fmt.Println("Examples:")
 	fmt.Println("  rtc-agent configure")
+	fmt.Println("  rtc-agent service install")
 	fmt.Println("  rtc-agent status")
 	fmt.Println("  rtc-agent help doctor")
 }
@@ -262,6 +300,9 @@ func printCommandHelp(command string) {
 	case "version", "ver":
 		fmt.Println("rtc-agent version")
 		fmt.Println("  Show the agent version and the built-in server base URL.")
+	case "service":
+		fmt.Println("rtc-agent service <install|uninstall|start|stop|restart|init-config|save-token>")
+		fmt.Println("  Run native Windows service and installation management actions without PowerShell scripts.")
 	case "paths", "path":
 		fmt.Println("rtc-agent paths")
 		fmt.Println("  Show important local file paths used by the agent.")

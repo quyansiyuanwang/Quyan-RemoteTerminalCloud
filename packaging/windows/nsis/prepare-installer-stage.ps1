@@ -18,12 +18,7 @@ $StageRoot = Resolve-AbsolutePath $StageRoot
 foreach ($p in @(
   (Join-Path $AgentBundleRoot "bin\rtc-agent.exe"),
   (Join-Path $AgentBundleRoot "bin\rtc-agent-manager.exe"),
-  (Join-Path $AgentBundleRoot "packaging\windows\install-service.ps1"),
-  (Join-Path $AgentBundleRoot "packaging\windows\uninstall-service.ps1"),
-  (Join-Path $AgentBundleRoot "packaging\windows\stop-service.ps1"),
-  (Join-Path $AgentBundleRoot "packaging\windows\manage-agent.ps1"),
-  (Join-Path $AgentBundleRoot "packaging\windows\write-config.ps1"),
-  (Join-Path $AgentBundleRoot "packaging\windows\init-config.ps1"),
+  (Join-Path $AgentBundleRoot "bin\rtc-agent-installer.exe"),
   (Join-Path $AgentBundleRoot "packaging\windows\agent.config.json"),
   (Join-Path $AgentBundleRoot "packaging\windows\RemoteTerminalCloudAgentService.xml"),
   (Join-Path $AgentBundleRoot "packaging\windows\download-winsw.ps1"),
@@ -47,7 +42,10 @@ foreach ($d in @(
 
 Copy-Item (Join-Path $AgentBundleRoot "bin\rtc-agent.exe")                  (Join-Path $StageRoot "bin\rtc-agent.exe") -Force
 Copy-Item (Join-Path $AgentBundleRoot "bin\rtc-agent-manager.exe")          (Join-Path $StageRoot "bin\rtc-agent-manager.exe") -Force
-Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\*")                (Join-Path $StageRoot "packaging\windows") -Recurse -Force
+Copy-Item (Join-Path $AgentBundleRoot "bin\rtc-agent-installer.exe")        (Join-Path $StageRoot "bin\rtc-agent-installer.exe") -Force
+Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\agent.config.json") (Join-Path $StageRoot "packaging\windows\agent.config.json") -Force
+Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\download-winsw.ps1") (Join-Path $StageRoot "packaging\windows\download-winsw.ps1") -Force
+Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\nsis\*")           (Join-Path $StageRoot "packaging\windows\nsis") -Recurse -Force
 Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\RemoteTerminalCloudAgentService.xml") `
                                                                         (Join-Path $StageRoot "service\RemoteTerminalCloudAgentService.xml") -Force
 

@@ -47,13 +47,9 @@ $BundleWinSWDownloader = Join-Path $BundlePackagingWindowsRoot "download-winsw.p
 foreach ($RequiredPath in @(
   (Join-Path $BundleBinRoot "rtc-agent.exe"),
   (Join-Path $BundleBinRoot "rtc-agent-manager.exe"),
+  (Join-Path $BundleBinRoot "rtc-agent-installer.exe"),
   $BundlePackagingWindowsRoot,
   $BundleWixRoot,
-  $BundleInstallScript,
-  $BundleUninstallScript,
-  $BundleStopScript,
-  $BundleManageScript,
-  $BundleInitScript,
   $BundleServiceXml,
   $BundleWixFile,
   $BundleWinSWDownloader
@@ -91,7 +87,10 @@ foreach ($DirectoryPath in @(
 
 Copy-Item -Path (Join-Path $BundleBinRoot "rtc-agent.exe") -Destination (Join-Path $StageBinRoot "rtc-agent.exe") -Force
 Copy-Item -Path (Join-Path $BundleBinRoot "rtc-agent-manager.exe") -Destination (Join-Path $StageBinRoot "rtc-agent-manager.exe") -Force
-Copy-Item -Path (Join-Path $BundlePackagingWindowsRoot "*") -Destination $StagePackagingWindowsRoot -Recurse -Force
+Copy-Item -Path (Join-Path $BundleBinRoot "rtc-agent-installer.exe") -Destination (Join-Path $StageBinRoot "rtc-agent-installer.exe") -Force
+Copy-Item -Path (Join-Path $BundlePackagingWindowsRoot "agent.config.json") -Destination (Join-Path $StagePackagingWindowsRoot "agent.config.json") -Force
+Copy-Item -Path (Join-Path $BundlePackagingWindowsRoot "download-winsw.ps1") -Destination (Join-Path $StagePackagingWindowsRoot "download-winsw.ps1") -Force
+Copy-Item -Path (Join-Path $BundleWixRoot "*") -Destination (Join-Path $StagePackagingWindowsRoot "wix") -Recurse -Force
 Copy-Item -Path $BundleServiceXml -Destination (Join-Path $StageServiceRoot "RemoteTerminalCloudAgentService.xml") -Force
 
 $StageWinSWExe = Join-Path $StageServiceRoot "RemoteTerminalCloudAgentService.exe"

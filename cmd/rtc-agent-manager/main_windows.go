@@ -46,7 +46,6 @@ const (
 var (
 	user32               = windows.NewLazySystemDLL("user32.dll")
 	kernel32             = windows.NewLazySystemDLL("kernel32.dll")
-	advapi32             = windows.NewLazySystemDLL("advapi32.dll")
 	procCreateWindowExW   = user32.NewProc("CreateWindowExW")
 	procDefWindowProcW    = user32.NewProc("DefWindowProcW")
 	procDispatchMessageW  = user32.NewProc("DispatchMessageW")
@@ -61,12 +60,6 @@ var (
 	procTranslateMessage  = user32.NewProc("TranslateMessage")
 	procUpdateWindow      = user32.NewProc("UpdateWindow")
 	procGetModuleHandleW  = kernel32.NewProc("GetModuleHandleW")
-	procOpenSCManagerW    = advapi32.NewProc("OpenSCManagerW")
-	procOpenServiceW      = advapi32.NewProc("OpenServiceW")
-	procStartServiceW     = advapi32.NewProc("StartServiceW")
-	procControlService    = advapi32.NewProc("ControlService")
-	procCloseServiceHandle = advapi32.NewProc("CloseServiceHandle")
-	procQueryServiceStatus = advapi32.NewProc("QueryServiceStatus")
 )
 
 type point struct {
@@ -96,16 +89,6 @@ type wndClassEx struct {
 	MenuName   *uint16
 	ClassName  *uint16
 	IconSm     windows.Handle
-}
-
-type serviceStatus struct {
-	ServiceType      uint32
-	CurrentState     uint32
-	ControlsAccepted uint32
-	Win32ExitCode    uint32
-	ServiceExitCode  uint32
-	CheckPoint       uint32
-	WaitHint         uint32
 }
 
 type uiState struct {
@@ -269,63 +252,22 @@ func saveToken() {
 }
 
 func runServiceAction(action string) {
-	ok, message := controlWindowsService(action)
-	if !ok {
-		showError("Remote Terminal Cloud Agent", message)
+	var err error
+	switch action {
+	case "start":
+		err = agent.StartWindowsService()
+	case "stop":
+		err = agent.StopWindowsService("")
+	case "restart":
+		err = agent.RestartWindowsService("")
+	default:
+		err = fmt.Errorf("unknown service action: %s", action)
+	}
+	if err != nil {
+		showError("Remote Terminal Cloud Agent", err.Error())
 		return
 	}
 	refreshUI()
-}
-
-func controlWindowsService(action string) (bool, string) {
-	manager, err := openServiceManager()
-	if err != nil {
-		return false, err.Error()
-	}
-	defer procCloseServiceHandle.Call(uintptr(manager))
-
-	namePtr, _ := windows.UTF16PtrFromString("RemoteTerminalCloudAgent")
-	service, _, err := procOpenServiceW.Call(uintptr(manager), uintptr(unsafe.Pointer(namePtr)), uintptr(serviceAllAccess))
-	if service == 0 {
-		return false, err.Error()
-	}
-	defer procCloseServiceHandle.Call(service)
-
-	switch action {
-	case "start":
-		ret, _, err := procStartServiceW.Call(service, 0, 0)
-		if ret == 0 {
-			return false, err.Error()
-		}
-	case "stop":
-		var status serviceStatus
-		ret, _, err := procControlService.Call(service, uintptr(1), uintptr(unsafe.Pointer(&status)))
-		if ret == 0 {
-			return false, err.Error()
-		}
-	case "restart":
-		if ok, msg := controlWindowsService("stop"); !ok {
-			return false, msg
-		}
-		if ok, msg := controlWindowsService("start"); !ok {
-			return false, msg
-		}
-	}
-
-	return true, ""
-}
-
-const (
-	scManagerAllAccess = 0xF003F
-	serviceAllAccess   = 0xF01FF
-)
-
-func openServiceManager() (windows.Handle, error) {
-	handle, _, err := procOpenSCManagerW.Call(0, 0, uintptr(scManagerAllAccess))
-	if handle == 0 {
-		return 0, err
-	}
-	return windows.Handle(handle), nil
 }
 
 func refreshUI() {
@@ -411,8 +353,9 @@ func openFolderOrError(resolve func() (string, error)) {
 		showError("Remote Terminal Cloud Agent", err.Error())
 		return
 	}
-	_ = os.MkdirAll(path, 0o755)
-	_ = windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr("explorer.exe"), windows.StringToUTF16Ptr(path), nil, windows.SW_SHOWNORMAL)
+	if err := agent.OpenPathInExplorer(path); err != nil {
+		showError("Remote Terminal Cloud Agent", err.Error())
+	}
 }
 
 func showError(title string, message string) {

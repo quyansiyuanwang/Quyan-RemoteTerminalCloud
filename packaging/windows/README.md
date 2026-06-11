@@ -1,6 +1,6 @@
 # Windows packaging
 
-This directory contains the first-pass Windows service and MSI scaffolding for the agent.
+This directory contains the Windows packaging scaffolding for the agent.
 
 ## Service model
 
@@ -13,14 +13,11 @@ The default `config.json` template only leaves `registrationToken` empty. The ag
 
 When the agent is launched manually from an interactive terminal and no token is configured yet, it will prompt for the registration token once and save it into the configured `config.json`. The background Windows service remains non-interactive and continues retrying as before.
 
-The MSI now installs the Windows service via standard WiX `ServiceInstall` / `ServiceControl` tables instead of launching PowerShell custom actions during install.
+Core Windows install and management logic now lives in Go binaries. Packaging scripts in this folder are wrappers for staging and installer generation, not the source of truth for install behavior.
 
 ## Files
 
-- `install-service.ps1` — manual install helper for non-MSI scenarios
-- `uninstall-service.ps1` — manual uninstall helper for non-MSI scenarios
-- `stop-service.ps1` — upgrade-safe stop helper that waits for the service and child processes to exit
-- `manage-agent.ps1` — user-facing Windows management entry for start/stop/config/log access
+- `bin/rtc-agent-installer.exe` — native Windows install/admin helper used by NSIS, WiX, and shortcuts
 - `bin/rtc-agent-manager.exe` — native Windows manager entry point installed with the product
 - `RemoteTerminalCloudAgentService.xml` — WinSW service definition
 - `download-winsw.ps1` — fetches a WinSW executable for packaging or staging
@@ -31,14 +28,15 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 ## WiX build-root layout
 
 - `bin/rtc-agent.exe` — compiled agent binary
+- `bin/rtc-agent-installer.exe` — compiled native installer helper
 - `service/RemoteTerminalCloudAgentService.exe` — WinSW binary
 - `service/RemoteTerminalCloudAgentService.xml` — WinSW config
-- `packaging/windows/` — support scripts used by install/uninstall
+- `packaging/windows/` — staging templates and build wrappers
 - `artifacts/windows/out/` — default MSI output directory
 
 The WiX authoring expects `AgentBuildRoot` to follow this layout exactly.
 
-During upgrade installs, both NSIS and WiX now stop the existing `RemoteTerminalCloudAgent` service and wait for `rtc-agent.exe` / `RemoteTerminalCloudAgentService.exe` to fully exit before replacing files. This avoids the common "Error opening file for writing" failure during overwrite installs.
+During upgrade installs, both NSIS and WiX now invoke the native installer helper to stop the existing `RemoteTerminalCloudAgent` service and wait for `rtc-agent.exe` / `RemoteTerminalCloudAgentService.exe` to fully exit before replacing files. This avoids the common "Error opening file for writing" failure during overwrite installs.
 
 The Windows installers also create Start Menu shortcuts so end users can manage the agent without browsing into the install directory manually.
 

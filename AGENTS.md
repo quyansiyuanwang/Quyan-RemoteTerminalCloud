@@ -47,6 +47,8 @@ Current priority is to make the Windows experience feel like a real product inst
 - Keep cross-platform builds working; add Windows-specific files with build tags when needed
 - Treat `build/` and `release/` as disposable output directories
 - Do not commit generated binaries or installer artifacts unless explicitly requested
+- Do not add new business logic or install/runtime logic to PowerShell or bash scripts when it can live in Go
+- Packaging scripts should be thin wrappers around Go binaries, not the source of truth for product behavior
 
 ## Validation Expectations
 
