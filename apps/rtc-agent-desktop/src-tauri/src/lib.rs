@@ -12,6 +12,10 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager, State, WindowEvent};
 use tokio::process::{Child, Command};
+#[cfg(target_os = "windows")]
+use winreg::RegKey;
+#[cfg(target_os = "windows")]
+use winreg::enums::{HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
 
 const TRAY_ID: &str = "rtc-agent-tray";
 const MENU_OPEN: &str = "open-manager";
@@ -508,9 +512,9 @@ fn push_exe_relative_candidates(
             break;
         };
         candidates.push(dir.join(file_name));
-        candidates.push(dir.join("bin").join(file_name));
         candidates.push(dir.join("resources").join(file_name));
         candidates.push(dir.join("resources").join("bin").join(file_name));
+        candidates.push(dir.join("bin").join(file_name));
         current = dir.parent();
     }
 }
@@ -685,15 +689,11 @@ fn looks_like_service_running(message: &str) -> bool {
 fn is_autostart_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let output = std::process::Command::new("reg")
-            .args([
-                "query",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                "/v",
-                APP_RUN_REG_VALUE,
-            ])
-            .output();
-        return output.map(|item| item.status.success()).unwrap_or(false);
+        return windows_run_key()
+            .ok()
+            .and_then(|key| key.get_value::<String, _>(APP_RUN_REG_VALUE).ok())
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -705,23 +705,9 @@ fn enable_autostart() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         let exe = env::current_exe().context("resolve current desktop executable")?;
-        let status = std::process::Command::new("reg")
-            .args([
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                "/v",
-                APP_RUN_REG_VALUE,
-                "/t",
-                "REG_SZ",
-                "/d",
-                &format!("\"{}\"", exe.display()),
-                "/f",
-            ])
-            .status()
+        let key = windows_run_key_write()?;
+        key.set_value(APP_RUN_REG_VALUE, &format!("\"{}\"", exe.display()))
             .context("update autostart registry value")?;
-        if !status.success() {
-            bail!("failed to enable autostart via Windows Run registry");
-        }
         return Ok(());
     }
     #[cfg(not(target_os = "windows"))]
@@ -733,18 +719,13 @@ fn enable_autostart() -> Result<()> {
 fn disable_autostart() -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        let status = std::process::Command::new("reg")
-            .args([
-                "delete",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                "/v",
-                APP_RUN_REG_VALUE,
-                "/f",
-            ])
-            .status()
-            .context("remove autostart registry value")?;
-        if !status.success() {
-            bail!("failed to disable autostart via Windows Run registry");
+        let key = windows_run_key_write()?;
+        match key.delete_value(APP_RUN_REG_VALUE) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(anyhow!(err).context("remove autostart registry value"));
+            }
         }
         return Ok(());
     }
@@ -752,6 +733,28 @@ fn disable_autostart() -> Result<()> {
     {
         bail!("autostart management is currently implemented for Windows only")
     }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_run_key() -> Result<RegKey> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    hkcu
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            KEY_QUERY_VALUE,
+        )
+        .context("open Windows Run registry key")
+}
+
+#[cfg(target_os = "windows")]
+fn windows_run_key_write() -> Result<RegKey> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    hkcu
+        .open_subkey_with_flags(
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            KEY_SET_VALUE | KEY_QUERY_VALUE,
+        )
+        .context("open Windows Run registry key for write")
 }
 
 fn show_main_window(app: &AppHandle) -> Result<()> {

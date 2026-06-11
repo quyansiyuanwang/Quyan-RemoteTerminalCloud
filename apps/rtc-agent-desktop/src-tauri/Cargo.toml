@@ -20,3 +20,6 @@ tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-opener.workspace = true
 tauri-plugin-shell.workspace = true
 tokio.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55.0"
