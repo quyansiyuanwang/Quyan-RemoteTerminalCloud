@@ -6,7 +6,10 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
-use rtc_agent_config::{default_config_file_path, normalize_template_string, read_config_file};
+use rtc_agent_config::{
+    default_config_file_path, default_preferences_file_path, normalize_template_string,
+    read_config_file,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -158,14 +161,14 @@ impl DesktopState {
 }
 
 #[tauri::command]
-async fn desktop_bootstrap(state: State<'_, DesktopState>) -> Result<BootstrapPayload, String> {
-    build_bootstrap_payload(&state).await.map_err(|err| err.to_string())
+async fn desktop_bootstrap(state: State<'_, Arc<DesktopState>>) -> Result<BootstrapPayload, String> {
+    build_bootstrap_payload(state.as_ref()).await.map_err(|err| err.to_string())
 }
 
 #[tauri::command]
 async fn save_token(
     token: String,
-    state: State<'_, DesktopState>,
+    state: State<'_, Arc<DesktopState>>,
     app: AppHandle,
 ) -> Result<SaveTokenResult, String> {
     let token = token.trim().to_owned();
@@ -188,7 +191,7 @@ async fn save_token(
 #[tauri::command]
 async fn desktop_agent_action(
     action: String,
-    state: State<'_, DesktopState>,
+    state: State<'_, Arc<DesktopState>>,
     app: AppHandle,
 ) -> Result<DesktopAgentActionResult, String> {
     let normalized = action.trim().to_ascii_lowercase();
@@ -226,7 +229,7 @@ async fn desktop_agent_action(
 #[tauri::command]
 async fn set_autostart(
     enabled: bool,
-    state: State<'_, DesktopState>,
+    state: State<'_, Arc<DesktopState>>,
     app: AppHandle,
 ) -> Result<AutostartResult, String> {
     if enabled {
@@ -250,14 +253,15 @@ async fn set_autostart(
 
 #[tauri::command]
 async fn resolve_path(kind: String) -> Result<PathResult, String> {
-    let action = match kind.trim() {
-        "config" | "configDir" => "open-config-dir",
-        "logs" | "logsDir" => "open-logs",
+    let path = match kind.trim() {
+        "config" | "configDir" => default_config_file_path()
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf(),
+        "logs" | "logsDir" => managed_logs_dir(),
         other => return Err(format!("Unsupported path kind: {other}")),
     };
-    let result = run_installer_json::<PathResult>(&["windows", action, "--json"])
-        .await
-        .map_err(|err| err.to_string())?;
+    let result = PathResult { path: path.display().to_string() };
     open_path_in_file_manager(&result.path).map_err(|err| err.to_string())?;
     Ok(result)
 }
@@ -265,8 +269,16 @@ async fn resolve_path(kind: String) -> Result<PathResult, String> {
 async fn build_bootstrap_payload(state: &DesktopState) -> Result<BootstrapPayload> {
     reconcile_agent_state(state).await;
     let status = run_agent_json::<StatusPayload>(&["status", "--json"]).await?;
-    let installer_paths =
-        run_installer_json::<InstallerPaths>(&["windows", "paths", "--json"]).await?;
+    let installer_paths = InstallerPaths {
+        config_file: default_config_file_path().display().to_string(),
+        preferences_file: default_preferences_file_path().display().to_string(),
+        config_dir: default_config_file_path()
+            .parent()
+            .unwrap_or(Path::new("."))
+            .display()
+            .to_string(),
+        logs_dir: managed_logs_dir().display().to_string(),
+    };
     let agent = build_agent_overview(state).await;
     Ok(BootstrapPayload {
         status,
@@ -436,12 +448,22 @@ async fn run_json_command<T>(binary_name: &str, args: &[&str]) -> Result<T>
 where
     T: DeserializeOwned,
 {
+    let candidate_names = binary_candidate_names(binary_name);
+    let candidates = resolve_binary_candidates(&candidate_names);
     let binary = resolve_binary(binary_name);
     let output = Command::new(&binary)
         .args(args)
         .output()
         .await
-        .with_context(|| format!("failed to spawn `{}`", binary.display()))?;
+        .with_context(|| {
+            let attempted = candidates
+                .iter()
+                .take(8)
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("failed to spawn `{}`. attempted: {}", binary.display(), attempted)
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
@@ -471,16 +493,28 @@ fn resolve_binary(binary_name: &str) -> PathBuf {
     }
 
     let candidate_names = binary_candidate_names(binary_name);
+    let candidates = resolve_binary_candidates(&candidate_names);
+
+    for candidate in candidates {
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(candidate_names.into_iter().next().unwrap_or_else(|| binary_file_name(binary_name)))
+}
+
+fn resolve_binary_candidates(candidate_names: &[String]) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
     if let Ok(current_exe) = env::current_exe() {
-        for file_name in &candidate_names {
+        for file_name in candidate_names {
             push_exe_relative_candidates(&mut candidates, current_exe.parent(), file_name);
         }
     }
 
     if let Ok(cwd) = env::current_dir() {
-        for file_name in &candidate_names {
+        for file_name in candidate_names {
             push_exe_relative_candidates(&mut candidates, Some(cwd.as_path()), file_name);
         }
     }
@@ -488,7 +522,9 @@ fn resolve_binary(binary_name: &str) -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     if let Some(workspace_root) = manifest_dir.ancestors().nth(3) {
         let target_dir = workspace_root.join("target");
-        for file_name in &candidate_names {
+        let build_bin_dir = workspace_root.join("build").join("bin").join("win32-x64");
+        for file_name in candidate_names {
+            candidates.push(build_bin_dir.join(file_name));
             candidates.push(target_dir.join("debug").join(file_name));
             candidates.push(target_dir.join("release").join(file_name));
             candidates.push(target_dir.join(file_name));
@@ -499,16 +535,7 @@ fn resolve_binary(binary_name: &str) -> PathBuf {
     }
 
     let mut seen = HashSet::new();
-    for candidate in candidates {
-        if !seen.insert(candidate.clone()) {
-            continue;
-        }
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-
-    PathBuf::from(candidate_names.into_iter().next().unwrap_or_else(|| binary_file_name(binary_name)))
+    candidates.into_iter().filter(|candidate| seen.insert(candidate.clone())).collect()
 }
 
 fn push_exe_relative_candidates(
@@ -551,6 +578,8 @@ fn open_path_in_file_manager(path: &str) -> Result<()> {
     let mut command = if cfg!(target_os = "windows") {
         let mut command = Command::new("explorer");
         command.arg(path);
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
         command
     } else if cfg!(target_os = "macos") {
         let mut command = Command::new("open");

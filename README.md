@@ -100,6 +100,7 @@ Rust 发布入口：
 cargo xtask build
 cargo xtask bundle
 cargo xtask artifact
+cargo xtask package
 ```
 
 可通过环境变量指定目标平台：
@@ -199,8 +200,7 @@ release/artifacts/<platform>-<arch>/
 默认推荐的 Windows 出包顺序：
 
 ```bash
-cargo xtask bundle
-cargo xtask windows-desktop-bundle --bundles nsis
+cargo xtask package
 ```
 
 默认产物会落在：

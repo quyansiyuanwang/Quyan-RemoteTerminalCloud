@@ -7,8 +7,8 @@ This document describes the current deployment foundation for `Products/remote-t
 The repository now includes:
 
 - config-file based runtime configuration
-- Windows desktop-first NSIS and WiX installer authoring
-- Windows staging builders that assemble `bin/` and `packaging/windows/`, with optional service payload support
+- Windows desktop-first NSIS installer authoring
+- Windows packaging helpers that assemble the desktop app and sidecars
 - Linux `systemd` unit, install/uninstall scripts, and `deb` packaging builder
 - macOS `launchd` plist, install/uninstall scripts, and `pkg` packaging builder
 - a Rust release-bundle builder that assembles `bin/`, Rust source snapshots, and `packaging/`
@@ -32,26 +32,22 @@ Output:
 
 Bundle contents:
 
-- `bin/` — compiled Rust binaries for agent, installer, desktop app, and compatibility manager alias
+- `bin/` — compiled Rust binaries for agent, installer, and desktop app
 - `apps/` / `crates/` / `xtask/` — Rust source snapshot for inspection and debugging
 - `packaging/` — platform service and installer templates
-- `artifacts/windows/` — Windows NSIS/MSI packaging handoff files
+- `artifacts/windows/` — Windows NSIS packaging handoff files
 - `artifacts/<platform>/` — downstream installer placeholders for each platform
 
 Windows packaging flow:
 
 1. Create the release bundle.
-2. Run `cargo xtask windows-nsis-stage --force` for the EXE installer build root.
-3. Run `cargo xtask windows-nsis-build` against `artifacts/windows/installer-build-root/`.
-4. Run `cargo xtask windows-msi-stage --force` for the MSI build root.
-5. Run `cargo xtask windows-msi-build --accept-eula` against `artifacts/windows/msi-build-root/`.
+2. Run `cargo xtask package` for the default Windows desktop package.
 
 Default Windows staging is desktop-first:
 
 - bundles `rtc-agent-desktop.exe` as the main app
 - initializes onboarding through the desktop UI after install
-- does not require WinSW/service payloads unless `--include-service` is explicitly requested
-- auto-detects `makensis.exe` from `PATH`, standard install roots, and common package-manager layouts before requiring `--nsis-exe`
+- does not require WinSW/service payloads in the default package
 
 ## CI artifacts
 
@@ -65,7 +61,6 @@ Current CI outputs:
 - macOS: `release/artifacts/darwin-arm64/*.tar.gz` and `*.pkg`
 - Windows: `release/artifacts/win32-x64/*.zip`
 - Windows NSIS: `release/artifacts/windows-installers/nsis/*.exe`
-- Windows MSI: `release/artifacts/windows-installers/msi/*.msi`
 - GitHub Release on `v*` tags: all archived assets above plus `SHA256SUMS.txt`
 
 Release automation rules:
@@ -112,4 +107,4 @@ Override config path with:
 2. add macOS signing and notarization pipeline
 3. add release publishing provenance
 4. extend Linux packaging from `deb` to `rpm`
-5. add code signing for Windows MSI and desktop binaries
+5. add code signing for Windows desktop binaries

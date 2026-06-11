@@ -16,6 +16,7 @@ enum Command {
     Build,
     Bundle,
     Artifact,
+    Package,
     WindowsDesktopBundle(WindowsDesktopBundleArgs),
 }
 
@@ -37,6 +38,7 @@ fn main() -> Result<()> {
         Command::Build => PackagingCommand::Build,
         Command::Bundle => PackagingCommand::Bundle,
         Command::Artifact => PackagingCommand::Artifact,
+        Command::Package => PackagingCommand::Package,
         Command::WindowsDesktopBundle(args) => PackagingCommand::WindowsDesktopBundle {
             output_dir: args.output_dir,
             bundles: args.bundles,

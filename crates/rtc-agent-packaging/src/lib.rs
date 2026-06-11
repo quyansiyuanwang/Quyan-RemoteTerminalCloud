@@ -49,6 +49,7 @@ pub enum PackagingCommand {
     Build,
     Bundle,
     Artifact,
+    Package,
     WindowsDesktopBundle {
         output_dir: Option<PathBuf>,
         bundles: String,
@@ -101,6 +102,7 @@ pub fn run_packaging_command(command: PackagingCommand) -> Result<PackagingActio
         PackagingCommand::Build => build_command(&ctx),
         PackagingCommand::Bundle => bundle_command(&ctx),
         PackagingCommand::Artifact => artifact_command(&ctx),
+        PackagingCommand::Package => package_command(&ctx),
         PackagingCommand::WindowsDesktopBundle { output_dir, bundles, target } => {
             windows_desktop_bundle_command(&ctx, output_dir.as_deref(), &bundles, target.as_deref())
         }
@@ -242,6 +244,30 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         ctx.platform_out_root.join(archive_file_name(ctx)).display().to_string(),
     );
     Ok(success("artifact", "Rust platform artifact assembled.", details))
+}
+
+fn package_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
+    if ctx.target_platform == "win32" {
+        let output_dir = ctx
+            .project_root
+            .join("release")
+            .join("artifacts")
+            .join("windows-installers")
+            .join("tauri");
+        let result = windows_desktop_bundle_command(ctx, Some(&output_dir), "nsis", None)?;
+        let mut details = result.details;
+        details.insert("mode".into(), "windows-desktop-bundle".into());
+        return Ok(success(
+            "package",
+            "Windows desktop package built.",
+            details,
+        ));
+    }
+
+    let result = artifact_command(ctx)?;
+    let mut details = result.details;
+    details.insert("mode".into(), "artifact".into());
+    Ok(success("package", "Platform package built.", details))
 }
 
 fn windows_desktop_bundle_command(

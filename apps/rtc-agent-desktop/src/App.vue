@@ -96,6 +96,52 @@ const agentBadge = computed(() => {
   if (agent.value?.hasToken) return "Ready";
   return "Needs Token";
 });
+const agentBadgeClass = computed(() => {
+  if (agent.value?.running) return "is-success";
+  if (agent.value?.hasToken) return "is-warning";
+  return "is-danger";
+});
+const overviewItems = computed(() => {
+  if (!status.value) return [];
+  return [
+    { label: "版本", value: status.value.version },
+    { label: "平台", value: `${status.value.platform}/${status.value.arch}` },
+    { label: "服务端", value: status.value.serverBaseUrl },
+    { label: "Shell", value: shellSummary.value },
+    { label: "SSH", value: `${status.value.sshAvailable ? "可用" : "不可用"} / ${status.value.sshDetail}` },
+    { label: "Heartbeat", value: status.value.runHeartbeat ? "启用" : "禁用" },
+    { label: "Tunnel", value: status.value.runTunnel ? "启用" : "禁用" },
+    {
+      label: "默认工作目录",
+      value: status.value.preferencesSummary.defaultWorkingDirectory || "未设置",
+    },
+  ];
+});
+const pathItems = computed(() => {
+  if (!installerPaths.value && !status.value) return [];
+  return [
+    {
+      label: "配置文件",
+      value: installerPaths.value?.configFile ?? status.value?.configFile ?? "",
+    },
+    {
+      label: "偏好文件",
+      value: installerPaths.value?.preferencesFile ?? status.value?.preferencesFile ?? "",
+    },
+    {
+      label: "日志目录",
+      value: installerPaths.value?.logsDir ?? "",
+    },
+  ];
+});
+const cliItems = computed(() => [
+  { label: "查看状态", command: "rtc-agent status --json" },
+  { label: "配置 Token", command: "rtc-agent configure" },
+  { label: "连通性验证", command: "rtc-agent verify --json" },
+  { label: "查看路径", command: "rtc-agent paths --json" },
+  { label: "Shell 能力", command: "rtc-agent shells --json" },
+  { label: "服务状态", command: "rtc-agent service status --json" },
+]);
 
 async function refresh() {
   loading.value = true;
@@ -202,117 +248,183 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="shell">
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">Remote Terminal Cloud Agent</p>
-        <h1>桌面程序现在就是主入口</h1>
-        <p class="subtle">
-          安装后由桌面管理器负责托盘常驻、开机自启、后台运行 agent。
-          Service 保留为可选能力，不再是普通用户的主路径。
-        </p>
-        <p v-if="onboardingRequired" class="hero-callout">
-          首次启动引导：先保存 Token，桌面后台代理就会自动接管运行。
-        </p>
+  <main class="console-shell">
+    <header class="topbar">
+      <div class="topbar__brand">
+        <div class="brand-mark">RTC</div>
+        <div>
+          <p class="brand-label">Remote Terminal Cloud Agent</p>
+          <h1>桌面管理控制台</h1>
+        </div>
       </div>
-      <div class="hero-status">
-        <p class="status-kicker">Desktop Mode</p>
-        <strong>{{ agentBadge }}</strong>
-        <span>{{ agent?.statusSummary ?? "正在读取后台状态" }}</span>
+      <div class="topbar__actions">
+        <span class="status-pill" :class="agentBadgeClass">{{ agentBadge }}</span>
+        <button class="button button-secondary" @click="refresh" :disabled="loading">
+          {{ loading ? "刷新中..." : "刷新状态" }}
+        </button>
       </div>
+    </header>
+
+    <section class="notice-strip" v-if="onboardingRequired || error || feedback">
+      <div v-if="onboardingRequired" class="alert alert-warning">
+        首次启动引导：请先填写 Token，保存后桌面端会自动接管后台运行。
+      </div>
+      <div v-if="error" class="alert alert-danger">{{ error }}</div>
+      <div v-if="feedback" class="alert alert-success">{{ feedback }}</div>
     </section>
 
-    <p v-if="error" class="banner banner-error">{{ error }}</p>
-    <p v-if="feedback" class="banner banner-feedback">{{ feedback }}</p>
+    <section class="summary-grid">
+      <article class="summary-card">
+        <span class="summary-card__label">Agent 状态</span>
+        <strong>{{ agent?.running ? "运行中" : "未运行" }}</strong>
+        <p>{{ agent?.statusSummary ?? "正在读取后台状态" }}</p>
+      </article>
+      <article class="summary-card">
+        <span class="summary-card__label">Token 来源</span>
+        <strong>{{ agent?.tokenSource ?? "none" }}</strong>
+        <p>{{ hasToken ? "已具备连接条件，可直接接管运行。" : "尚未配置 token，后台代理不会启动。" }}</p>
+      </article>
+      <article class="summary-card">
+        <span class="summary-card__label">开机自启</span>
+        <strong>{{ agent?.autostartEnabled ? "已启用" : "未启用" }}</strong>
+        <p>登录当前用户后自动启动桌面管理器并驻留托盘。</p>
+      </article>
+    </section>
 
-    <section class="dashboard">
-      <article class="card primary-card">
-        <div class="card-header">
+    <section class="workspace-grid">
+      <article class="panel panel-span-7">
+        <div class="panel__header">
           <div>
-            <p class="section-tag">Background Agent</p>
-            <h2>后台常驻</h2>
+            <p class="panel__eyebrow">Agent Control</p>
+            <h2>后台运行控制</h2>
           </div>
-          <button @click="refresh" :disabled="loading">{{ loading ? "刷新中" : "刷新状态" }}</button>
+          <span class="panel__hint">推荐把桌面端作为唯一入口使用</span>
         </div>
 
-        <div class="hero-grid">
-          <div class="hero-panel">
-            <span class="panel-label">当前状态</span>
-            <strong>{{ agent?.running ? "运行中" : "未运行" }}</strong>
-            <p>{{ agent?.statusSummary }}</p>
-          </div>
-          <div class="hero-panel">
-            <span class="panel-label">开机自启</span>
-            <strong>{{ agent?.autostartEnabled ? "已启用" : "未启用" }}</strong>
-            <p>以当前用户身份登录后自动启动桌面管理器并最小化到托盘。</p>
-          </div>
-          <div class="hero-panel">
-            <span class="panel-label">Token 来源</span>
-            <strong>{{ agent?.tokenSource ?? "none" }}</strong>
-            <p>{{ hasToken ? "后台 agent 可以直接接管运行。" : "需要先填写 token 才能启动。" }}</p>
-          </div>
+        <div class="toolbar">
+          <button
+            class="button button-primary"
+            @click="runDesktopAction('start')"
+            :disabled="!!activeDesktopAction"
+          >
+            {{ activeDesktopAction === "start" ? "启动中..." : "启动后台 Agent" }}
+          </button>
+          <button
+            class="button button-secondary"
+            @click="runDesktopAction('stop')"
+            :disabled="!!activeDesktopAction"
+          >
+            {{ activeDesktopAction === "stop" ? "停止中..." : "停止后台 Agent" }}
+          </button>
+          <button
+            class="button button-secondary"
+            @click="runDesktopAction('restart')"
+            :disabled="!!activeDesktopAction"
+          >
+            {{ activeDesktopAction === "restart" ? "重启中..." : "重启后台 Agent" }}
+          </button>
+          <button class="button button-secondary" @click="toggleAutostart" :disabled="autostartBusy">
+            {{ autostartBusy ? "处理中..." : agent?.autostartEnabled ? "关闭开机自启" : "启用开机自启" }}
+          </button>
         </div>
 
-        <div class="button-row">
-          <button class="primary" @click="runDesktopAction('start')" :disabled="!!activeDesktopAction">
-            {{ activeDesktopAction === "start" ? "启动中" : "启动后台 Agent" }}
-          </button>
-          <button @click="runDesktopAction('stop')" :disabled="!!activeDesktopAction">
-            {{ activeDesktopAction === "stop" ? "停止中" : "停止后台 Agent" }}
-          </button>
-          <button @click="runDesktopAction('restart')" :disabled="!!activeDesktopAction">
-            {{ activeDesktopAction === "restart" ? "重启中" : "重启后台 Agent" }}
-          </button>
-          <button @click="toggleAutostart" :disabled="autostartBusy">
-            {{ autostartBusy ? "处理中" : agent?.autostartEnabled ? "关闭开机自启" : "启用开机自启" }}
-          </button>
+        <div class="inline-kpis">
+          <div class="inline-kpi">
+            <span>期望状态</span>
+            <strong>{{ agent?.desiredRunning ? "保持运行" : "按需启动" }}</strong>
+          </div>
+          <div class="inline-kpi">
+            <span>当前进程 PID</span>
+            <strong>{{ agent?.pid ?? "--" }}</strong>
+          </div>
+          <div class="inline-kpi">
+            <span>连接准备度</span>
+            <strong>{{ hasToken ? "已就绪" : "待配置" }}</strong>
+          </div>
         </div>
       </article>
 
-      <article class="card">
-        <p class="section-tag">Token</p>
-        <h2>配置接入令牌</h2>
-        <p class="muted">
-          保存后会写入兼容配置文件，并立即触发桌面后台代理接管，不需要用户再去命令行里手动启动。
+      <article class="panel panel-span-5">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">Token</p>
+            <h2>接入配置</h2>
+          </div>
+        </div>
+
+        <p class="panel__desc">
+          保存后会写入兼容配置文件，并立即尝试由桌面端接管后台运行。
         </p>
+
+        <label class="field-label">Registration Token</label>
         <input
           v-model="token"
+          class="field-input"
           type="password"
           autocomplete="off"
-          placeholder="填写 registration token"
+          placeholder="请输入 registration token"
         />
-        <button class="primary" @click="saveToken" :disabled="tokenSaving">
-          {{ tokenSaving ? "保存中" : "保存并接管运行" }}
+        <button class="button button-primary button-block" @click="saveToken" :disabled="tokenSaving">
+          {{ tokenSaving ? "保存中..." : "保存并接管运行" }}
         </button>
       </article>
 
-      <article class="card">
-        <p class="section-tag">Overview</p>
-        <h2>主机与连接状态</h2>
-        <dl class="facts" v-if="status">
-          <div><dt>版本</dt><dd>{{ status.version }}</dd></div>
-          <div><dt>平台</dt><dd>{{ status.platform }}/{{ status.arch }}</dd></div>
-          <div><dt>服务端</dt><dd>{{ status.serverBaseUrl }}</dd></div>
-          <div><dt>Shells</dt><dd>{{ shellSummary }}</dd></div>
-          <div><dt>SSH</dt><dd>{{ status.sshAvailable ? "可用" : "不可用" }} / {{ status.sshDetail }}</dd></div>
-          <div><dt>Heartbeat</dt><dd>{{ status.runHeartbeat ? "启用" : "禁用" }}</dd></div>
-          <div><dt>Tunnel</dt><dd>{{ status.runTunnel ? "启用" : "禁用" }}</dd></div>
-          <div><dt>默认工作目录</dt><dd>{{ status.preferencesSummary.defaultWorkingDirectory || "未设置" }}</dd></div>
-        </dl>
-      </article>
+      <article class="panel panel-span-6">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">Runtime Overview</p>
+            <h2>主机与连接状态</h2>
+          </div>
+        </div>
 
-      <article class="card">
-        <p class="section-tag">Paths</p>
-        <h2>本地入口</h2>
-        <p class="path">{{ installerPaths?.configFile ?? status?.configFile }}</p>
-        <p class="path">{{ installerPaths?.preferencesFile ?? status?.preferencesFile }}</p>
-        <p class="path">{{ installerPaths?.logsDir }}</p>
-        <div class="button-row">
-          <button @click="openManagedPath('configDir')">打开配置目录</button>
-          <button @click="openManagedPath('logsDir')">打开日志目录</button>
+        <div class="info-grid">
+          <div v-for="item in overviewItems" :key="item.label" class="info-cell">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
         </div>
       </article>
 
+      <article class="panel panel-span-3">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">Local Paths</p>
+            <h2>本地入口</h2>
+          </div>
+        </div>
+
+        <div class="path-list">
+          <div v-for="item in pathItems" :key="item.label" class="path-item">
+            <span>{{ item.label }}</span>
+            <code>{{ item.value || "--" }}</code>
+          </div>
+        </div>
+
+        <div class="toolbar toolbar-compact">
+          <button class="button button-secondary" @click="openManagedPath('configDir')">
+            打开配置目录
+          </button>
+          <button class="button button-secondary" @click="openManagedPath('logsDir')">
+            打开日志目录
+          </button>
+        </div>
+      </article>
+
+      <article class="panel panel-span-3">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">CLI</p>
+            <h2>命令行可用</h2>
+          </div>
+        </div>
+
+        <div class="cli-list">
+          <div v-for="item in cliItems" :key="item.command" class="cli-item">
+            <span>{{ item.label }}</span>
+            <code>{{ item.command }}</code>
+          </div>
+        </div>
+      </article>
     </section>
   </main>
 </template>
