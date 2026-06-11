@@ -60,6 +60,26 @@ go run ./cmd/rtc-agent
 
 如果首次启动时未配置 `RTC_REGISTRATION_TOKEN`，交互式终端下会提示输入 token，并自动保存到默认 `config.json`，后续无需重复填写。
 
+也可以单独运行配置向导：
+
+```bash
+go run ./cmd/rtc-agent configure
+go run ./cmd/rtc-agent conf
+```
+
+常用 CLI 命令：
+
+```bash
+go run ./cmd/rtc-agent help
+go run ./cmd/rtc-agent help status
+go run ./cmd/rtc-agent version
+go run ./cmd/rtc-agent paths
+go run ./cmd/rtc-agent config
+go run ./cmd/rtc-agent status
+go run ./cmd/rtc-agent doctor
+go run ./cmd/rtc-agent shells
+```
+
 ## Build
 
 构建当前平台 Agent：
@@ -125,6 +145,19 @@ Agent 的服务端地址不再由用户配置：
 ```
 
 在交互式终端直接运行 Agent 时，如果 `registrationToken` 和 `RTC_REGISTRATION_TOKEN` 都为空，程序会提示输入 token，并将其写回配置文件；Windows 服务等非交互环境仍保持自动重试，不会阻塞启动。
+
+如需手动更新 token，可使用 `rtc-agent configure` 或 `rtc-agent conf` 启动交互向导并保存到配置文件。
+
+CLI 提供了一组便于排查的本地命令：
+
+- `rtc-agent help` — 查看全部命令
+- `rtc-agent help <command>` — 查看单个命令说明
+- `rtc-agent version` — 查看版本与内置服务端地址
+- `rtc-agent paths` — 查看配置文件、偏好文件和当前工作目录
+- `rtc-agent config` — 查看生效中的运行配置，不输出 token 明文
+- `rtc-agent status` — 查看主机、shell、SSH、token 等当前状态
+- `rtc-agent doctor` — 输出本地诊断摘要和建议
+- `rtc-agent shells` — 查看 shell 配置与探测结果
 
 ## Release
 

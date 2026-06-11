@@ -207,6 +207,10 @@ func PromptAndPersistRegistrationToken(configFilePath string) (*string, error) {
 	return token, nil
 }
 
+func HasRegistrationTokenEnvOverride() bool {
+	return normalizeTemplateString(readStringEnv("RTC_REGISTRATION_TOKEN")) != nil
+}
+
 func persistRegistrationToken(configFilePath string, token string) error {
 	cfg := readConfigFile(configFilePath)
 	cfg.RegistrationToken = stringPtr(token)
