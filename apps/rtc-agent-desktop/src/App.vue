@@ -50,7 +50,6 @@ type BootstrapPayload = {
   installerPaths: InstallerPaths;
   agent: AgentOverview;
   desktopMode: string;
-  serviceModeAvailable: boolean;
   onboardingRequired: boolean;
 };
 
@@ -85,7 +84,6 @@ const token = ref("");
 const loading = ref(false);
 const tokenSaving = ref(false);
 const activeDesktopAction = ref("");
-const activeServiceAction = ref("");
 const autostartBusy = ref(false);
 const error = ref("");
 const feedback = ref("");
@@ -152,21 +150,6 @@ async function runDesktopAction(action: "start" | "stop" | "restart" | "status")
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     activeDesktopAction.value = "";
-  }
-}
-
-async function runServiceAction(action: "start" | "stop" | "restart" | "status") {
-  activeServiceAction.value = action;
-  error.value = "";
-  feedback.value = "";
-  try {
-    const result = await invoke<ActionPayload>("service_action", { action });
-    feedback.value = result.message ?? `${action} finished.`;
-    await refresh();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    activeServiceAction.value = "";
   }
 }
 
@@ -330,27 +313,6 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <article class="card muted-card">
-        <p class="section-tag">Optional</p>
-        <h2>Windows Service</h2>
-        <p class="muted">
-          这是兼容模式，适合必须在用户未登录时也要在线的场景。普通桌面安装默认建议使用上面的托盘后台模式。
-        </p>
-        <div class="button-row">
-          <button @click="runServiceAction('start')" :disabled="!!activeServiceAction">
-            {{ activeServiceAction === "start" ? "启动中" : "启动服务" }}
-          </button>
-          <button @click="runServiceAction('stop')" :disabled="!!activeServiceAction">
-            {{ activeServiceAction === "stop" ? "停止中" : "停止服务" }}
-          </button>
-          <button @click="runServiceAction('restart')" :disabled="!!activeServiceAction">
-            {{ activeServiceAction === "restart" ? "重启中" : "重启服务" }}
-          </button>
-          <button @click="runServiceAction('status')" :disabled="!!activeServiceAction">
-            {{ activeServiceAction === "status" ? "查询中" : "查询服务" }}
-          </button>
-        </div>
-      </article>
     </section>
   </main>
 </template>

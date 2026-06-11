@@ -21,8 +21,6 @@ const MENU_RESTART_AGENT: &str = "restart-agent";
 const MENU_SAVE_AUTOSTART: &str = "save-autostart";
 const MENU_OPEN_CONFIG: &str = "open-config";
 const MENU_OPEN_LOGS: &str = "open-logs";
-const MENU_START_SERVICE: &str = "start-service";
-const MENU_STOP_SERVICE: &str = "stop-service";
 const MENU_QUIT: &str = "quit";
 const MAIN_WINDOW_LABEL: &str = "main";
 const APP_RUN_REG_VALUE: &str = "RemoteTerminalCloudAgentDesktop";
@@ -106,7 +104,6 @@ struct BootstrapPayload {
     installer_paths: InstallerPaths,
     agent: AgentOverview,
     desktop_mode: String,
-    service_mode_available: bool,
     onboarding_required: bool,
 }
 
@@ -227,18 +224,6 @@ async fn desktop_agent_action(
 }
 
 #[tauri::command]
-async fn service_action(action: String) -> Result<ServiceActionResult, String> {
-    let action = action.trim().to_ascii_lowercase();
-    let normalized = match action.as_str() {
-        "start" | "stop" | "restart" | "status" => action,
-        other => return Err(format!("Unsupported service action: {other}")),
-    };
-    run_installer_json::<ServiceActionResult>(&["windows", normalized.as_str(), "--json"])
-        .await
-        .map_err(|err| err.to_string())
-}
-
-#[tauri::command]
 async fn set_autostart(
     enabled: bool,
     state: State<'_, DesktopState>,
@@ -288,7 +273,6 @@ async fn build_bootstrap_payload(state: &DesktopState) -> Result<BootstrapPayloa
         installer_paths,
         agent,
         desktop_mode: "tray-background-app".into(),
-        service_mode_available: true,
         onboarding_required: onboarding_required(),
     })
 }
@@ -508,6 +492,9 @@ fn resolve_binary(binary_name: &str) -> PathBuf {
             candidates.push(target_dir.join("debug").join(file_name));
             candidates.push(target_dir.join("release").join(file_name));
             candidates.push(target_dir.join(file_name));
+            candidates.push(target_dir.join("debug").join("deps").join(file_name));
+            candidates.push(target_dir.join("release").join("deps").join(file_name));
+            candidates.push(target_dir.join("deps").join(file_name));
         }
     }
 
@@ -749,10 +736,6 @@ fn build_tray(app: &AppHandle) -> Result<()> {
     let open_config =
         MenuItem::with_id(app, MENU_OPEN_CONFIG, "Open Config Folder", true, None::<&str>)?;
     let open_logs = MenuItem::with_id(app, MENU_OPEN_LOGS, "Open Logs", true, None::<&str>)?;
-    let start_service =
-        MenuItem::with_id(app, MENU_START_SERVICE, "Start Windows Service", true, None::<&str>)?;
-    let stop_service =
-        MenuItem::with_id(app, MENU_STOP_SERVICE, "Stop Windows Service", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -766,9 +749,6 @@ fn build_tray(app: &AppHandle) -> Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &open_config,
             &open_logs,
-            &PredefinedMenuItem::separator(app)?,
-            &start_service,
-            &stop_service,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -828,13 +808,6 @@ async fn handle_menu_event(app: AppHandle, state: Arc<DesktopState>, id: &str) {
                 let _ = open_path_in_file_manager(&result.path);
             }
         }
-        MENU_START_SERVICE => {
-            let _ =
-                run_installer_json::<ServiceActionResult>(&["windows", "start", "--json"]).await;
-        }
-        MENU_STOP_SERVICE => {
-            let _ = run_installer_json::<ServiceActionResult>(&["windows", "stop", "--json"]).await;
-        }
         MENU_QUIT => {
             let _ = stop_agent(&state).await;
             app.exit(0);
@@ -877,7 +850,6 @@ pub fn run() {
             desktop_bootstrap,
             save_token,
             desktop_agent_action,
-            service_action,
             set_autostart,
             resolve_path
         ])

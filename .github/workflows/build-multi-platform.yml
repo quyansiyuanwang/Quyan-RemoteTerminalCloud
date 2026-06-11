@@ -67,9 +67,7 @@ jobs:
             target_platform: win32
             target_arch: x64
             archive_glob: release/artifacts/win32-x64/*.zip
-            installer_glob: |
-              release/artifacts/windows-installers/nsis/*.exe
-              release/artifacts/windows-installers/msi/*.msi
+            installer_glob: release/artifacts/windows-installers/tauri/nsis/*.exe
 
     steps:
       - name: Checkout
@@ -95,12 +93,6 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      - name: Setup .NET SDK
-        if: matrix.target_platform == 'win32'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
       - name: Install desktop frontend dependencies
         run: npm ci
         working-directory: apps/rtc-agent-desktop
@@ -114,29 +106,9 @@ jobs:
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
         run: cargo xtask artifact
 
-      - name: Install NSIS
+      - name: Build Windows desktop bundle
         if: matrix.target_platform == 'win32'
-        run: choco install nsis --no-progress -y
-
-      - name: Prepare Windows installer stage
-        if: matrix.target_platform == 'win32'
-        run: cargo xtask windows-nsis-stage --force
-
-      - name: Build Windows NSIS installer
-        if: matrix.target_platform == 'win32'
-        run: cargo xtask windows-nsis-build --output-dir release/artifacts/windows-installers/nsis
-
-      - name: Install WiX
-        if: matrix.target_platform == 'win32'
-        run: dotnet tool install --global wix --version 7.*
-
-      - name: Prepare Windows MSI stage
-        if: matrix.target_platform == 'win32'
-        run: cargo xtask windows-msi-stage --force
-
-      - name: Build Windows MSI installer
-        if: matrix.target_platform == 'win32'
-        run: cargo xtask windows-msi-build --output-dir release/artifacts/windows-installers/msi --accept-eula
+        run: cargo xtask windows-desktop-bundle --bundles nsis
 
       - name: Upload platform archive
         uses: actions/upload-artifact@v4
@@ -170,7 +142,7 @@ jobs:
 
       - name: Generate SHA256 checksums
         run: |
-          find release-assets -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.pkg' \) -print0 \
+          find release-assets -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.exe' -o -name '*.deb' -o -name '*.pkg' \) -print0 \
             | sort -z \
             | xargs -0 sha256sum > release-assets/SHA256SUMS.txt
 
@@ -186,7 +158,6 @@ jobs:
             release-assets/**/*.tar.gz
             release-assets/**/*.zip
             release-assets/**/*.exe
-            release-assets/**/*.msi
             release-assets/**/*.deb
             release-assets/**/*.pkg
             release-assets/SHA256SUMS.txt

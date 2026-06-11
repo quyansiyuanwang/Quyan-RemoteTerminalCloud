@@ -8,7 +8,7 @@
 - 主程序由 `rtc-agent-desktop` 承担，负责窗口、托盘、开机自启、后台 agent 生命周期
 - 后台运行时由 `rtc-agentd` 承担
 - 安装/配置/Windows 服务辅助由 `rtc-agent-installer` 承担
-- 构建、bundle、artifact、NSIS、MSI 编排统一由 `cargo xtask` 承担
+- 构建、bundle、artifact、桌面安装包编排统一由 `cargo xtask` 承担
 
 ## Structure
 
@@ -28,7 +28,7 @@
 
 如果需要构建原生安装器，还需要：
 
-- Windows `NSIS` / `WiX`
+- Windows `NSIS`
 - Linux `dpkg-deb`
 - macOS `pkgbuild`
 
@@ -183,15 +183,14 @@ release/artifacts/<platform>-<arch>/
 
 当前支持的制品：
 
-- Windows: `zip`、`NSIS exe`、`WiX msi`
+- Windows: `zip`、`Tauri NSIS exe`
 - Linux: `tar.gz`、`deb`
 - macOS: `tar.gz`、`pkg`
 
 默认产物位置：
 
 - Windows bundle archive: `release/artifacts/win32-x64/*.zip`
-- Windows NSIS installer: `release/artifacts/windows-installers/nsis/*.exe`
-- Windows MSI installer: `release/artifacts/windows-installers/msi/*.msi`
+- Windows desktop installer: `release/artifacts/windows-installers/tauri/nsis/*.exe`
 - Linux archive/installer: `release/artifacts/linux-x64/`
 - macOS archive/installer: `release/artifacts/darwin-arm64/`
 
@@ -201,69 +200,34 @@ release/artifacts/<platform>-<arch>/
 
 ```bash
 cargo xtask bundle
-cargo xtask windows-nsis-stage --force
-cargo xtask windows-nsis-build
-cargo xtask windows-msi-stage --force
-cargo xtask windows-msi-build --accept-eula
+cargo xtask windows-desktop-bundle --bundles nsis
 ```
 
-准备 NSIS 安装器输入目录：
+默认产物会落在：
+
+```text
+release/artifacts/windows-installers/tauri/nsis/
+```
+
+如需指定 Tauri bundler 目标架构：
 
 ```bash
-cargo xtask windows-nsis-stage \
-  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
-  --force
+cargo xtask windows-desktop-bundle \
+  --bundles nsis \
+  --target x86_64-pc-windows-msvc
 ```
 
-构建 NSIS 安装器：
-
-```bash
-cargo xtask windows-nsis-build \
-  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\installer-build-root"
-```
-
-如未自动发现 `makensis.exe`，可以显式指定：
-
-```bash
-cargo xtask windows-nsis-build \
-  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\installer-build-root" \
-  --nsis-exe "C:\path\to\makensis.exe"
-```
-
-准备 WiX MSI 输入目录：
-
-```bash
-cargo xtask windows-msi-stage \
-  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
-  --force
-```
-
-构建 WiX MSI：
-
-```bash
-cargo xtask windows-msi-build \
-  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root" \
-  --output-dir "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root\artifacts\windows\out" \
-  --accept-eula
-```
-
-如需单独下载 WinSW：
-
-```bash
-cargo xtask windows-download-winsw \
-  --target-exe "D:\path\to\RemoteTerminalCloudAgentService.exe" \
-  --force
-```
+MSI/WiX 已从默认发布链路下线，当前 Windows 只保留 `Tauri NSIS` 主线。
 
 ## CI
 
 当前 CI 会：
 
 - 用 `VERSION` 校验发布 tag
-- Windows 默认构建 desktop-first `NSIS` 与 `MSI`
-- Windows 构建会准备 Node/Rust/NSIS/WiX 所需依赖
+- Windows 默认构建 desktop-first `Tauri NSIS`
+- Windows 构建会准备 Node/Rust/NSIS 所需依赖
 - 统一通过 `cargo xtask` 编排发布
-- 上传 `zip`、`exe`、`msi`、`deb`、`pkg` 并生成统一 `SHA256SUMS.txt`
+- 上传 `zip`、`exe`、`deb`、`pkg` 并生成统一 `SHA256SUMS.txt`
 - 在 `v*` tag 时自动发布 GitHub Release
 
 ## Notes

@@ -102,7 +102,7 @@ pub fn current_platform() -> PlatformId {
 
 fn install_formats_for(platform: PlatformId) -> Vec<String> {
     match platform {
-        PlatformId::Windows => vec!["msi".into(), "exe".into()],
+        PlatformId::Windows => vec!["exe".into()],
         PlatformId::Linux => vec!["deb".into(), "rpm".into(), "binary".into()],
         PlatformId::Macos => vec!["pkg".into(), "signed-helper".into()],
     }

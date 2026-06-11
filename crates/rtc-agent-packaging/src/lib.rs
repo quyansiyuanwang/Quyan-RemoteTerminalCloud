@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
@@ -10,18 +10,14 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use reqwest::blocking::Client;
 use rtc_agent_config::RELEASE_SERVER_BASE_URL;
 use serde::Serialize;
 use tar::Builder as TarBuilder;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use which::which;
 use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
-
-const DEFAULT_WINSW_VERSION: &str = "v2.12.0";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,36 +49,10 @@ pub enum PackagingCommand {
     Build,
     Bundle,
     Artifact,
-    WindowsDownloadWinsw {
-        target_exe: PathBuf,
-        winsw_version: String,
-        force: bool,
-    },
-    WindowsNsisStage {
-        bundle_root: PathBuf,
-        stage_root: PathBuf,
-        winsw_version: String,
-        include_service: bool,
-        force: bool,
-    },
-    WindowsNsisBuild {
-        build_root: PathBuf,
-        output_dir: PathBuf,
-        version: Option<String>,
-        nsis_exe: Option<PathBuf>,
-    },
-    WindowsMsiStage {
-        bundle_root: PathBuf,
-        stage_root: PathBuf,
-        winsw_version: String,
-        include_service: bool,
-        force: bool,
-    },
-    WindowsMsiBuild {
-        build_root: PathBuf,
-        output_dir: PathBuf,
-        wix_exe: Option<PathBuf>,
-        accept_eula: bool,
+    WindowsDesktopBundle {
+        output_dir: Option<PathBuf>,
+        bundles: String,
+        target: Option<String>,
     },
 }
 
@@ -131,42 +101,8 @@ pub fn run_packaging_command(command: PackagingCommand) -> Result<PackagingActio
         PackagingCommand::Build => build_command(&ctx),
         PackagingCommand::Bundle => bundle_command(&ctx),
         PackagingCommand::Artifact => artifact_command(&ctx),
-        PackagingCommand::WindowsDownloadWinsw { target_exe, winsw_version, force } => {
-            download_winsw_command(&ctx, &target_exe, &winsw_version, force)
-        }
-        PackagingCommand::WindowsNsisStage {
-            bundle_root,
-            stage_root,
-            winsw_version,
-            include_service,
-            force,
-        } => windows_nsis_stage_command(
-            &ctx,
-            &bundle_root,
-            &stage_root,
-            &winsw_version,
-            include_service,
-            force,
-        ),
-        PackagingCommand::WindowsNsisBuild { build_root, output_dir, version, nsis_exe } => {
-            windows_nsis_build_command(&ctx, &build_root, &output_dir, version, nsis_exe)
-        }
-        PackagingCommand::WindowsMsiStage {
-            bundle_root,
-            stage_root,
-            winsw_version,
-            include_service,
-            force,
-        } => windows_msi_stage_command(
-            &ctx,
-            &bundle_root,
-            &stage_root,
-            &winsw_version,
-            include_service,
-            force,
-        ),
-        PackagingCommand::WindowsMsiBuild { build_root, output_dir, wix_exe, accept_eula } => {
-            windows_msi_build_command(&ctx, &build_root, &output_dir, wix_exe, accept_eula)
+        PackagingCommand::WindowsDesktopBundle { output_dir, bundles, target } => {
+            windows_desktop_bundle_command(&ctx, output_dir.as_deref(), &bundles, target.as_deref())
         }
     }
 }
@@ -188,10 +124,6 @@ fn build_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         false,
     )?;
     build_desktop_binary(ctx, &output_dir)?;
-    copy_compatibility_manager_binary(
-        &output_dir.join(binary_file_name(ctx, "rtc-agent-desktop")),
-        &output_dir.join(binary_file_name(ctx, "rtc-agent-manager")),
-    )?;
 
     let mut details = BTreeMap::new();
     details.insert("outputDir".into(), output_dir.display().to_string());
@@ -211,7 +143,6 @@ fn bundle_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
     let source_bin_dir = build_bin_dir(ctx);
     for name in [
         binary_file_name(ctx, "rtc-agent"),
-        binary_file_name(ctx, "rtc-agent-manager"),
         binary_file_name(ctx, "rtc-agent-desktop"),
         binary_file_name(ctx, "rtc-agent-installer"),
     ] {
@@ -244,7 +175,6 @@ fn bundle_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
             "name": "rtc-agent",
             "version": ctx.version,
             "binary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent")]),
-            "managerBinary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-manager")]),
             "desktopBinary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-desktop")]),
             "installerBinary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-installer")]),
         }),
@@ -279,7 +209,6 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
             "archiveFile": archive_file_name(ctx),
             "nativeInstallerFile": native_installer_file_name(ctx),
             "binaryPath": slash_join(["bin", &binary_file_name(ctx, "rtc-agent")]),
-            "managerBinaryPath": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-manager")]),
             "desktopBinaryPath": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-desktop")]),
             "installerBinaryPath": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-installer")]),
             "startCommand": start_command(ctx),
@@ -315,276 +244,92 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
     Ok(success("artifact", "Rust platform artifact assembled.", details))
 }
 
-fn download_winsw_command(
-    _ctx: &PackagingContext,
-    target_exe: &Path,
-    winsw_version: &str,
-    force: bool,
-) -> Result<PackagingActionResult> {
-    download_winsw_executable(target_exe, winsw_version, force)?;
-    let mut details = BTreeMap::new();
-    details.insert("targetExe".into(), target_exe.display().to_string());
-    Ok(success("windows-download-winsw", "WinSW downloaded.", details))
-}
-
-fn windows_nsis_stage_command(
+fn windows_desktop_bundle_command(
     ctx: &PackagingContext,
-    bundle_root: &Path,
-    stage_root: &Path,
-    winsw_version: &str,
-    include_service: bool,
-    force: bool,
+    output_dir: Option<&Path>,
+    bundles: &str,
+    target: Option<&str>,
 ) -> Result<PackagingActionResult> {
-    ensure_bundle_exists(ctx, bundle_root)?;
-    validate_windows_bundle_root(bundle_root, true, true)?;
-    prepare_clean_directory(stage_root, force)?;
-
-    for dir in [
-        stage_root.join("bin"),
-        stage_root.join("packaging").join("windows").join("nsis"),
-        stage_root.join("service"),
-        stage_root.join("artifacts").join("windows").join("out"),
-    ] {
-        fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    if ctx.target_platform != "win32" {
+        bail!("windows-desktop-bundle is only supported when RTC_TARGET_PLATFORM=win32");
     }
 
-    stage_windows_payload(bundle_root, stage_root, true, include_service)?;
-    if include_service {
-        download_winsw_executable(
-            &stage_root.join("service").join("RemoteTerminalCloudAgentService.exe"),
-            winsw_version,
-            true,
-        )?;
-    }
+    let desktop_dir = ctx.project_root.join("apps").join("rtc-agent-desktop");
+    let output_dir = output_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| ctx.project_root.join("release").join("artifacts").join("windows-installers").join("tauri"));
+    fs::create_dir_all(&output_dir).with_context(|| format!("create {}", output_dir.display()))?;
 
-    let output_dir = stage_root.join("artifacts").join("windows").join("out");
-    write_json(
-        &stage_root.join("NSIS-INPUTS.json"),
-        serde_json::json!({
-            "generatedAt": now_rfc3339()?,
-            "agentBundleRoot": bundle_root.display().to_string(),
-            "winSWVersion": winsw_version,
-            "serviceMode": include_service,
-            "stageRoot": stage_root.display().to_string(),
-            "outputDir": output_dir.display().to_string(),
-            "buildExample": xtask_command_line("windows-nsis-build", &[("--build-root", Some(stage_root))]),
-        }),
+    let stage_dir = ctx.project_root.join("target").join("xtask").join("tauri-desktop-bundle");
+    if stage_dir.exists() {
+        fs::remove_dir_all(&stage_dir).with_context(|| format!("remove {}", stage_dir.display()))?;
+    }
+    fs::create_dir_all(&stage_dir).with_context(|| format!("create {}", stage_dir.display()))?;
+
+    let target_triple = target
+        .map(|value| value.to_owned())
+        .unwrap_or_else(|| rust_target_triple(ctx).unwrap_or_else(|_| "x86_64-pc-windows-msvc".to_owned()));
+    let sidecar_dir = stage_dir.join("deps");
+    fs::create_dir_all(&sidecar_dir).with_context(|| format!("create {}", sidecar_dir.display()))?;
+
+    build_cli_binary(
+        ctx,
+        "rtc-agentd",
+        &sidecar_dir.join(format!("rtc-agentd-{target_triple}.exe")),
+        false,
     )?;
-
-    let mut readme_lines = vec![
-        "Remote Terminal Cloud Agent - Windows NSIS build root".to_owned(),
-        "".into(),
-        "This directory is ready to be used with cargo xtask.".into(),
-        "".into(),
-        "Build command:".into(),
-        xtask_command_line("windows-nsis-build", &[("--build-root", Some(stage_root))]),
-        "".into(),
-        "Default mode:".into(),
-        "- Installs and launches rtc-agent-desktop as the primary background app".into(),
-        "- Service wrapper files are optional and excluded unless --include-service is used".into(),
-        "".into(),
-        "Key paths:".into(),
-        "- bin\\rtc-agent.exe".into(),
-        "- bin\\rtc-agent-manager.exe".into(),
-        "- bin\\rtc-agent-desktop.exe".into(),
-        "- bin\\rtc-agent-installer.exe".into(),
-        "- packaging\\windows\\nsis\\agent.nsi".into(),
-        "- artifacts\\windows\\out".into(),
-    ];
-    if include_service {
-        readme_lines.push("- service\\RemoteTerminalCloudAgentService.exe".into());
-        readme_lines.push("- service\\RemoteTerminalCloudAgentService.xml".into());
-    }
-    fs::write(stage_root.join("README.txt"), readme_lines.join("\n"))
-        .with_context(|| format!("write {}", stage_root.join("README.txt").display()))?;
-
-    let mut details = BTreeMap::new();
-    details.insert("stageRoot".into(), stage_root.display().to_string());
-    details.insert("outputDir".into(), output_dir.display().to_string());
-    Ok(success("windows-nsis-stage", "Windows NSIS staging prepared.", details))
-}
-
-fn windows_nsis_build_command(
-    ctx: &PackagingContext,
-    build_root: &Path,
-    output_dir: &Path,
-    version: Option<String>,
-    nsis_exe: Option<PathBuf>,
-) -> Result<PackagingActionResult> {
-    validate_windows_build_root(build_root, true, true)?;
-    fs::create_dir_all(output_dir).with_context(|| format!("create {}", output_dir.display()))?;
-
-    let resolved_version = version
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .or_else(|| load_version_from_build_root(build_root))
-        .unwrap_or_else(|| ctx.version.clone());
-
-    let nsis_path = find_nsis_executable(nsis_exe.as_deref())?;
-    let script = build_root.join("packaging").join("windows").join("nsis").join("agent.nsi");
-    run_streaming_command(
-        Some(build_root),
-        &nsis_path,
-        &[
-            format!("/DAGENT_BUILD_ROOT={}", build_root.display()),
-            format!("/DAGENT_OUTPUT_DIR={}", output_dir.display()),
-            format!("/DAGENT_VERSION={resolved_version}"),
-            script.display().to_string(),
-        ],
+    build_cli_binary(
+        ctx,
+        "rtc-agent-installer",
+        &sidecar_dir.join(format!("rtc-agent-installer-{target_triple}.exe")),
+        false,
     )?;
+    build_desktop_binary(ctx, &stage_dir)?;
+
+    let mut npm = Command::new(node_package_manager_command());
+    npm.current_dir(&desktop_dir).arg("run").arg("build");
+    run_command(&mut npm, "desktop frontend build failed")?;
+
+    let tauri_config_patch = serde_json::json!({
+        "bundle": {
+            "externalBin": [
+                sidecar_dir.join("rtc-agentd").display().to_string(),
+                sidecar_dir.join("rtc-agent-installer").display().to_string()
+            ]
+        }
+    })
+    .to_string();
+
+    let mut tauri = Command::new(node_package_manager_command());
+    tauri
+        .current_dir(&desktop_dir.join("src-tauri"))
+        .arg("run")
+        .arg("tauri")
+        .arg("--")
+        .arg("build")
+        .arg("--bundles")
+        .arg(bundles)
+        .env("TAURI_CONFIG", tauri_config_patch)
+        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL)
+        .env("RTC_AGENT_BUNDLE_OUTPUT_DIR", &output_dir);
+    if let Some(target) = target.filter(|value| !value.trim().is_empty()) {
+        tauri.arg("--target").arg(target);
+    }
+    run_command(&mut tauri, "tauri desktop bundle failed")?;
+
+    let tauri_bundle_root = ctx.project_root.join("target").join("release").join("bundle");
+    if tauri_bundle_root.exists() {
+        copy_tree(&tauri_bundle_root, &output_dir)?;
+    }
 
     let mut details = BTreeMap::new();
     details.insert("outputDir".into(), output_dir.display().to_string());
-    details.insert("nsisExe".into(), nsis_path.display().to_string());
-    Ok(success("windows-nsis-build", "Windows NSIS installer built.", details))
-}
-
-fn windows_msi_stage_command(
-    ctx: &PackagingContext,
-    bundle_root: &Path,
-    stage_root: &Path,
-    winsw_version: &str,
-    include_service: bool,
-    force: bool,
-) -> Result<PackagingActionResult> {
-    ensure_bundle_exists(ctx, bundle_root)?;
-    validate_windows_bundle_root(bundle_root, true, true)?;
-    prepare_clean_directory(stage_root, force)?;
-
-    for dir in [
-        stage_root.join("bin"),
-        stage_root.join("packaging").join("windows").join("wix"),
-        stage_root.join("service"),
-        stage_root.join("artifacts").join("windows").join("out"),
-    ] {
-        fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-    }
-
-    stage_windows_payload(bundle_root, stage_root, false, include_service)?;
-    if include_service {
-        download_winsw_executable(
-            &stage_root.join("service").join("RemoteTerminalCloudAgentService.exe"),
-            winsw_version,
-            true,
-        )?;
-    }
-
-    let output_dir = stage_root.join("artifacts").join("windows").join("out");
-    write_json(
-        &stage_root.join("MSI-INPUTS.json"),
-        serde_json::json!({
-            "generatedAt": now_rfc3339()?,
-            "agentBundleRoot": bundle_root.display().to_string(),
-            "winSWVersion": winsw_version,
-            "serviceMode": include_service,
-            "stageRoot": stage_root.display().to_string(),
-            "outputDir": output_dir.display().to_string(),
-            "buildExample": xtask_command_line("windows-msi-build", &[
-                ("--build-root", Some(stage_root)),
-                ("--output-dir", Some(&output_dir)),
-            ]),
-        }),
-    )?;
-
-    if include_service {
-        let service_readme = [
-            "This folder contains the optional service wrapper payload for MSI packaging.",
-            "Bundled files:",
-            "- RemoteTerminalCloudAgentService.exe",
-            "- RemoteTerminalCloudAgentService.xml",
-        ]
-        .join("\n");
-        fs::write(stage_root.join("service").join("README.txt"), service_readme).with_context(
-            || format!("write {}", stage_root.join("service").join("README.txt").display()),
-        )?;
-    }
-
-    let mut stage_readme = vec![
-        "Remote Terminal Cloud Agent - Windows MSI build root".to_owned(),
-        "".into(),
-        "This directory is ready to be used as AgentBuildRoot for WiX.".into(),
-        "".into(),
-        "Build command:".into(),
-        xtask_command_line(
-            "windows-msi-build",
-            &[("--build-root", Some(stage_root)), ("--output-dir", Some(&output_dir))],
-        ),
-        "".into(),
-        "Default mode:".into(),
-        "- Installs and launches rtc-agent-desktop as the primary background app".into(),
-        "- Service wrapper files are optional and excluded unless --include-service is used".into(),
-        "".into(),
-        "Key paths:".into(),
-        "- bin\\rtc-agent.exe".into(),
-        "- bin\\rtc-agent-manager.exe".into(),
-        "- bin\\rtc-agent-desktop.exe".into(),
-        "- bin\\rtc-agent-installer.exe".into(),
-        "- packaging\\windows\\agent.config.json".into(),
-        "- packaging\\windows\\wix\\RemoteTerminalCloudAgent.wxs".into(),
-    ];
-    if include_service {
-        stage_readme.push("- service\\RemoteTerminalCloudAgentService.exe".into());
-        stage_readme.push("- service\\RemoteTerminalCloudAgentService.xml".into());
-    }
-    fs::write(stage_root.join("README.txt"), stage_readme.join("\n"))
-        .with_context(|| format!("write {}", stage_root.join("README.txt").display()))?;
-
-    let mut details = BTreeMap::new();
-    details.insert("stageRoot".into(), stage_root.display().to_string());
-    details.insert("outputDir".into(), output_dir.display().to_string());
-    Ok(success("windows-msi-stage", "Windows MSI staging prepared.", details))
-}
-
-fn windows_msi_build_command(
-    _ctx: &PackagingContext,
-    build_root: &Path,
-    output_dir: &Path,
-    wix_exe: Option<PathBuf>,
-    accept_eula: bool,
-) -> Result<PackagingActionResult> {
-    validate_windows_build_root(build_root, false, true)?;
-    fs::create_dir_all(output_dir).with_context(|| format!("create {}", output_dir.display()))?;
-
-    let wix_path = find_executable(wix_exe.as_deref(), &["wix.exe", "wix"])
-        .context("wix.exe not found. Install WiX Toolset CLI and ensure it is on PATH")?;
-    let (wix_version, wix_major) = detect_wix_version(&wix_path)?;
-
-    let mut extension_name = "WixToolset.UI.wixext".to_owned();
-    if let Some(version) = wix_version.as_ref() {
-        extension_name.push('/');
-        extension_name.push_str(version);
-    }
-    run_streaming_command(None, &wix_path, &["extension".into(), "add".into(), extension_name, "--global".into()])?;
-
-    let msi_path = output_dir.join("RemoteTerminalCloudAgent.msi");
-    let mut wix_args = vec!["build".to_owned()];
-    if accept_eula && wix_major.unwrap_or_default() >= 7 {
-        wix_args.push("--acceptEula".into());
-        wix_args.push("yes".into());
-    }
-    wix_args.extend([
-        "-ext".into(),
-        "WixToolset.UI.wixext".into(),
-        "-d".into(),
-        format!("AgentBuildRoot={}", build_root.display()),
-        build_root
-            .join("packaging")
-            .join("windows")
-            .join("wix")
-            .join("RemoteTerminalCloudAgent.wxs")
-            .display()
-            .to_string(),
-        "-out".into(),
-        msi_path.display().to_string(),
-    ]);
-    run_streaming_command(Some(build_root), &wix_path, &wix_args)?;
-
-    let mut details = BTreeMap::new();
-    if let Some(version) = wix_version {
-        details.insert("wixVersion".into(), version);
-    }
-    details.insert("output".into(), msi_path.display().to_string());
-    Ok(success("windows-msi-build", "Windows MSI built.", details))
+    details.insert("bundles".into(), bundles.to_owned());
+    Ok(success(
+        "windows-desktop-bundle",
+        "Tauri desktop bundle built.",
+        details,
+    ))
 }
 
 fn build_cli_binary(
@@ -663,10 +408,6 @@ fn node_package_manager_command() -> &'static str {
     if cfg!(windows) { "npm.cmd" } else { "npm" }
 }
 
-fn copy_compatibility_manager_binary(source: &Path, target: &Path) -> Result<()> {
-    copy_file(source, target)
-}
-
 fn build_bin_dir(ctx: &PackagingContext) -> PathBuf {
     ctx.project_root
         .join("build")
@@ -700,317 +441,6 @@ fn cargo_binary_output_path(ctx: &PackagingContext, package_name: &str) -> Resul
     }
     let target = rust_target_triple(ctx)?;
     Ok(ctx.project_root.join("target").join(target).join("release").join(file_name))
-}
-
-fn ensure_bundle_exists(ctx: &PackagingContext, bundle_root: &Path) -> Result<()> {
-    if bundle_root.exists() {
-        return Ok(());
-    }
-    if bundle_root == ctx.bundle_root {
-        bundle_command(ctx)?;
-        return Ok(());
-    }
-    bail!("bundle root not found: {}", bundle_root.display())
-}
-
-fn stage_windows_payload(
-    bundle_root: &Path,
-    stage_root: &Path,
-    include_nsis: bool,
-    include_service: bool,
-) -> Result<()> {
-    for binary_name in [
-        "rtc-agent.exe",
-        "rtc-agent-manager.exe",
-        "rtc-agent-desktop.exe",
-        "rtc-agent-installer.exe",
-    ] {
-        copy_file(
-            &bundle_root.join("bin").join(binary_name),
-            &stage_root.join("bin").join(binary_name),
-        )?;
-    }
-
-    copy_file(
-        &bundle_root.join("packaging").join("windows").join("agent.config.json"),
-        &stage_root.join("packaging").join("windows").join("agent.config.json"),
-    )?;
-    if include_service {
-        copy_file(
-            &bundle_root
-                .join("packaging")
-                .join("windows")
-                .join("RemoteTerminalCloudAgentService.xml"),
-            &stage_root
-                .join("service")
-                .join("RemoteTerminalCloudAgentService.xml"),
-        )?;
-    }
-    copy_tree(
-        &bundle_root.join("packaging").join("windows").join("wix"),
-        &stage_root.join("packaging").join("windows").join("wix"),
-    )?;
-    if include_nsis {
-        copy_tree(
-            &bundle_root.join("packaging").join("windows").join("nsis"),
-            &stage_root.join("packaging").join("windows").join("nsis"),
-        )?;
-    }
-    let version_file = bundle_root.join("VERSION");
-    if version_file.exists() {
-        copy_file(&version_file, &stage_root.join("VERSION"))?;
-    }
-    Ok(())
-}
-
-fn validate_windows_bundle_root(bundle_root: &Path, require_nsis: bool, require_wix: bool) -> Result<()> {
-    let mut required = vec![
-        bundle_root.join("bin").join("rtc-agent.exe"),
-        bundle_root.join("bin").join("rtc-agent-manager.exe"),
-        bundle_root.join("bin").join("rtc-agent-desktop.exe"),
-        bundle_root.join("bin").join("rtc-agent-installer.exe"),
-        bundle_root.join("packaging").join("windows").join("agent.config.json"),
-        bundle_root
-            .join("packaging")
-            .join("windows")
-            .join("RemoteTerminalCloudAgentService.xml"),
-    ];
-    if require_nsis {
-        required.push(
-            bundle_root
-                .join("packaging")
-                .join("windows")
-                .join("nsis")
-                .join("agent.nsi"),
-        );
-    }
-    if require_wix {
-        required.push(
-            bundle_root
-                .join("packaging")
-                .join("windows")
-                .join("wix")
-                .join("RemoteTerminalCloudAgent.wxs"),
-        );
-    }
-    validate_required_paths("bundle input", &required)
-}
-
-fn validate_windows_build_root(build_root: &Path, require_nsis: bool, require_wix: bool) -> Result<()> {
-    let mut required = vec![
-        build_root.join("bin").join("rtc-agent.exe"),
-        build_root.join("bin").join("rtc-agent-manager.exe"),
-        build_root.join("bin").join("rtc-agent-desktop.exe"),
-        build_root.join("bin").join("rtc-agent-installer.exe"),
-        build_root.join("packaging").join("windows").join("agent.config.json"),
-    ];
-    if require_nsis {
-        required.push(
-            build_root
-                .join("packaging")
-                .join("windows")
-                .join("nsis")
-                .join("agent.nsi"),
-        );
-    }
-    if require_wix {
-        required.push(
-            build_root
-                .join("packaging")
-                .join("windows")
-                .join("wix")
-                .join("RemoteTerminalCloudAgent.wxs"),
-        );
-    }
-    validate_required_paths("build input", &required)
-}
-
-fn validate_required_paths(kind: &str, required: &[PathBuf]) -> Result<()> {
-    for path in required {
-        if !path.exists() {
-            bail!("required {kind} missing: {}", path.display());
-        }
-    }
-    Ok(())
-}
-
-fn prepare_clean_directory(path: &Path, force: bool) -> Result<()> {
-    if path.exists() {
-        if !force {
-            bail!(
-                "path already exists: {} (re-run with --force to replace it)",
-                path.display()
-            );
-        }
-        fs::remove_dir_all(path).with_context(|| format!("remove {}", path.display()))?;
-    }
-    fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))
-}
-
-fn load_version_from_build_root(build_root: &Path) -> Option<String> {
-    fs::read_to_string(build_root.join("VERSION"))
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-}
-
-fn find_nsis_executable(override_path: Option<&Path>) -> Result<PathBuf> {
-    if let Some(path) = override_path {
-        return Ok(resolve_path(path));
-    }
-    if let Ok(path) = which("makensis.exe").or_else(|_| which("makensis")) {
-        return Ok(path);
-    }
-    if let Some(path) = first_existing_file(&nsis_executable_candidates()) {
-        return Ok(path);
-    }
-    bail!(
-        "makensis.exe not found. Checked PATH plus standard, WinGet, Chocolatey, Scoop, and NSIS_HOME/NSIS_ROOT locations. Install NSIS, reopen the shell, or pass --nsis-exe"
-    )
-}
-
-fn find_executable(override_path: Option<&Path>, candidates: &[&str]) -> Result<PathBuf> {
-    if let Some(path) = override_path {
-        return Ok(resolve_path(path));
-    }
-    for candidate in candidates {
-        if let Ok(path) = which(candidate) {
-            return Ok(path);
-        }
-    }
-    bail!("executable not found")
-}
-
-fn nsis_executable_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    let mut add = |value: Option<String>, parts: &[&str]| {
-        let Some(value) = value.map(|item| item.trim().to_owned()).filter(|item| !item.is_empty())
-        else {
-            return;
-        };
-        let mut candidate = PathBuf::from(value);
-        for part in parts {
-            candidate.push(part);
-        }
-        candidates.push(candidate);
-    };
-
-    let program_files = env::var("ProgramFiles").ok();
-    let program_files_x86 = env::var("ProgramFiles(x86)").ok();
-    let local_app_data = env::var("LOCALAPPDATA").ok();
-    let chocolatey_install = env::var("ChocolateyInstall").ok();
-    let user_profile = env::var("USERPROFILE").ok();
-    let scoop_root = env::var("SCOOP").ok().or_else(|| user_profile.map(|value| format!("{value}\\scoop")));
-    let nsis_home = env::var("NSIS_HOME").ok();
-    let nsis_root = env::var("NSIS_ROOT").ok();
-
-    add(program_files_x86.clone(), &["NSIS", "makensis.exe"]);
-    add(program_files.clone(), &["NSIS", "makensis.exe"]);
-    add(program_files_x86.clone(), &["Nullsoft Scriptable Install System", "makensis.exe"]);
-    add(program_files.clone(), &["Nullsoft Scriptable Install System", "makensis.exe"]);
-    add(local_app_data.clone(), &["Programs", "NSIS", "makensis.exe"]);
-    add(local_app_data.clone(), &["NSIS", "makensis.exe"]);
-    add(chocolatey_install.clone(), &["bin", "makensis.exe"]);
-    add(chocolatey_install.clone(), &["lib", "nsis", "tools", "makensis.exe"]);
-    add(chocolatey_install.clone(), &["lib", "nsis.portable", "tools", "makensis.exe"]);
-    add(scoop_root.clone(), &["shims", "makensis.exe"]);
-    add(scoop_root.clone(), &["apps", "nsis", "current", "makensis.exe"]);
-    add(nsis_home, &["makensis.exe"]);
-    add(nsis_root, &["makensis.exe"]);
-
-    for pattern in [
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*NSIS*\makensis.exe")),
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*NSIS*\*\makensis.exe")),
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*NSIS*\*\*\makensis.exe")),
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*Nullsoft*\makensis.exe")),
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*Nullsoft*\*\makensis.exe")),
-        local_app_data
-            .as_ref()
-            .map(|base| format!(r"{base}\Microsoft\WinGet\Packages\*Nullsoft*\*\*\makensis.exe")),
-        program_files_x86.as_ref().map(|base| format!(r"{base}\*NSIS*\makensis.exe")),
-        program_files.as_ref().map(|base| format!(r"{base}\*NSIS*\makensis.exe")),
-        chocolatey_install.as_ref().map(|base| format!(r"{base}\lib\nsis*\tools\makensis.exe")),
-        chocolatey_install
-            .as_ref()
-            .map(|base| format!(r"{base}\lib\nsis*\tools\*\makensis.exe")),
-        scoop_root.as_ref().map(|base| format!(r"{base}\apps\nsis\*\makensis.exe")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Ok(paths) = glob_paths(&pattern) {
-            candidates.extend(paths);
-        }
-    }
-
-    dedupe_paths(candidates)
-}
-
-fn first_existing_file(candidates: &[PathBuf]) -> Option<PathBuf> {
-    candidates.iter().find(|path| path.is_file()).cloned()
-}
-
-fn detect_wix_version(path: &Path) -> Result<(Option<String>, Option<i32>)> {
-    let output = Command::new(path)
-        .arg("--version")
-        .stderr(Stdio::inherit())
-        .output()
-        .with_context(|| format!("run {} --version", path.display()))?;
-    if !output.status.success() {
-        bail!("failed to detect WiX version");
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let version = text
-        .split_whitespace()
-        .find(|token| token.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
-        .map(str::to_owned);
-    let major = version
-        .as_ref()
-        .and_then(|value| value.split('.').next())
-        .and_then(|value| value.parse::<i32>().ok());
-    Ok((version, major))
-}
-
-fn run_streaming_command(cwd: Option<&Path>, command: &Path, args: &[String]) -> Result<()> {
-    let mut cmd = Command::new(command);
-    if let Some(cwd) = cwd {
-        cmd.current_dir(cwd);
-    }
-    cmd.args(args);
-    run_command(&mut cmd, &format!("command failed: {} {}", command.display(), args.join(" ")))
-}
-
-fn download_winsw_executable(target_exe: &Path, version: &str, force: bool) -> Result<()> {
-    let winsw_version = if version.trim().is_empty() { DEFAULT_WINSW_VERSION } else { version };
-    if target_exe.exists() && !force {
-        return Ok(());
-    }
-    if let Some(parent) = target_exe.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-
-    let url = format!("https://github.com/winsw/winsw/releases/download/{winsw_version}/WinSW-x64.exe");
-    let response = Client::new().get(&url).send().with_context(|| format!("download {url}"))?;
-    if !response.status().is_success() {
-        bail!("failed to download WinSW from {url}: {}", response.status());
-    }
-    let mut bytes = io::Cursor::new(response.bytes()?.to_vec());
-    let temp = target_exe.with_extension("download");
-    let mut file = File::create(&temp).with_context(|| format!("create {}", temp.display()))?;
-    io::copy(&mut bytes, &mut file).with_context(|| format!("write {}", temp.display()))?;
-    file.flush().ok();
-    replace_file(&temp, target_exe)?;
-    Ok(())
 }
 
 fn create_archive(ctx: &PackagingContext) -> Result<()> {
@@ -1175,10 +605,7 @@ fn replace_file(src: &Path, dst: &Path) -> Result<()> {
     }
     if dst.exists() {
         fs::remove_file(dst).with_context(|| {
-            format!(
-                "failed to replace {} (the file may still be in use by rtc-agent or rtc-agent-manager)",
-                dst.display()
-            )
+            format!("failed to replace {} (the file may still be in use by rtc-agent or rtc-agent-desktop)", dst.display())
         })?;
     }
     fs::rename(src, dst)
@@ -1272,24 +699,6 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     seen.into_values().collect()
 }
 
-fn glob_paths(pattern: &str) -> Result<Vec<PathBuf>> {
-    let mut cmd = Command::new("powershell");
-    cmd.arg("-NoProfile").arg("-Command").arg(format!(
-        "Get-ChildItem -Path '{}' -ErrorAction SilentlyContinue | ForEach-Object {{ $_.FullName }}",
-        pattern.replace('\'', "''")
-    ));
-    let output = cmd.output().context("resolve glob pattern")?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(PathBuf::from)
-        .collect())
-}
-
 fn walk_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !root.exists() {
@@ -1305,22 +714,6 @@ fn walk_files(root: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(files)
-}
-
-fn xtask_command_line(command: &str, args: &[(&str, Option<&Path>)]) -> String {
-    let mut parts = vec!["cargo".to_owned(), "xtask".to_owned(), command.to_owned()];
-    for (flag, value) in args {
-        parts.push((*flag).to_owned());
-        if let Some(value) = value {
-            let rendered = value.display().to_string();
-            if rendered.contains(' ') {
-                parts.push(format!("\"{rendered}\""));
-            } else {
-                parts.push(rendered);
-            }
-        }
-    }
-    parts.join(" ")
 }
 
 fn success(command: &str, message: &str, details: BTreeMap<String, String>) -> PackagingActionResult {
