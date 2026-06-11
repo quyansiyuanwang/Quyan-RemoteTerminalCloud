@@ -321,7 +321,17 @@ fn windows_desktop_bundle_command(
             "externalBin": [
                 sidecar_dir.join("rtc-agentd").display().to_string(),
                 sidecar_dir.join("rtc-agent-installer").display().to_string()
-            ]
+            ],
+            "windows": {
+                "nsis": {
+                    "template": desktop_dir
+                        .join("src-tauri")
+                        .join("nsis")
+                        .join("installer.nsi")
+                        .display()
+                        .to_string()
+                }
+            }
         }
     })
     .to_string();
