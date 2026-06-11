@@ -20,6 +20,7 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 - `install-service.ps1` — manual install helper for non-MSI scenarios
 - `uninstall-service.ps1` — manual uninstall helper for non-MSI scenarios
 - `stop-service.ps1` — upgrade-safe stop helper that waits for the service and child processes to exit
+- `manage-agent.ps1` — user-facing Windows management entry for start/stop/config/log access
 - `RemoteTerminalCloudAgentService.xml` — WinSW service definition
 - `download-winsw.ps1` — fetches a WinSW executable for packaging or staging
 - `wix/RemoteTerminalCloudAgent.wxs` — WiX v4 MSI authoring skeleton
@@ -37,6 +38,8 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 The WiX authoring expects `AgentBuildRoot` to follow this layout exactly.
 
 During upgrade installs, both NSIS and WiX now stop the existing `RemoteTerminalCloudAgent` service and wait for `rtc-agent.exe` / `RemoteTerminalCloudAgentService.exe` to fully exit before replacing files. This avoids the common "Error opening file for writing" failure during overwrite installs.
+
+The Windows installers also create Start Menu shortcuts so end users can manage the agent without browsing into the install directory manually.
 
 ## Build a real MSI
 

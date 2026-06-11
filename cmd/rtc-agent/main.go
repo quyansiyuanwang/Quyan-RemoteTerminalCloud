@@ -258,6 +258,7 @@ func printCommandHelp(command string) {
 	case "configure", "conf":
 		fmt.Println("rtc-agent configure")
 		fmt.Println("  Open an interactive prompt to save the registration token into config.json.")
+		fmt.Println("  Typed characters are masked as * so you can see input progress without exposing the token.")
 	case "version", "ver":
 		fmt.Println("rtc-agent version")
 		fmt.Println("  Show the agent version and the built-in server base URL.")

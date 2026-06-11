@@ -6,6 +6,7 @@
 ;   packaging\windows\install-service.ps1
 ;   packaging\windows\uninstall-service.ps1
 ;   packaging\windows\stop-service.ps1
+;   packaging\windows\manage-agent.ps1
 ;   packaging\windows\write-config.ps1
 ;   packaging\windows\agent.config.json
 
@@ -15,6 +16,7 @@ SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!include "x64.nsh"
 
 ;--------------------------------
 ; Metadata
@@ -47,6 +49,8 @@ Page custom ConfigPageCreate ConfigPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
+
+Var StartMenuFolder
 
 ;--------------------------------
 ; Config page — collect registration token only (server URL is pre-configured)
@@ -88,6 +92,7 @@ Section "Main" SecMain
   File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
@@ -105,6 +110,13 @@ Section "Main" SecMain
   ; Install and start service
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\install-service.ps1"'
 
+  StrCpy $StartMenuFolder "$SMPROGRAMS\Remote Terminal Cloud Agent"
+  CreateDirectory "$StartMenuFolder"
+  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" menu' "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" configure' "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-config-dir' "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-logs' "$INSTDIR\bin\rtc-agent.exe"
+
   ; Uninstaller + registry
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\RemoteTerminalCloudAgent" "InstallDir" "$INSTDIR"
@@ -119,6 +131,7 @@ SectionEnd
 ;--------------------------------
 Section "Uninstall"
   nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\uninstall-service.ps1"'
+  RMDir /r "$SMPROGRAMS\Remote Terminal Cloud Agent"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\RemoteTerminalCloudAgent"
   DeleteRegKey HKLM "Software\RemoteTerminalCloudAgent"

@@ -53,6 +53,10 @@
       </Directory>
     </StandardDirectory>
 
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="Remote Terminal Cloud Agent" />
+    </StandardDirectory>
+
     <StandardDirectory Id="CommonAppDataFolder">
       <Directory Id="PROGRAMDATA_AGENT" Name="RemoteTerminalCloudAgent">
         <Directory Id="PROGRAMDATA_AGENT_LOGS" Name="logs" />
@@ -65,6 +69,7 @@
       <ComponentRef Id="ProgramDataConfigComponent" />
       <ComponentRef Id="ProgramDataLogsDirectoryComponent" />
       <ComponentRef Id="ServiceWrapperComponent" />
+      <ComponentRef Id="StartMenuShortcutsComponent" />
     </Feature>
 
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
@@ -72,6 +77,7 @@
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\stop-service.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\manage-agent.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\write-config.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\init-config.ps1" />
     </ComponentGroup>
@@ -91,6 +97,31 @@
     <Component Id="ServiceWrapperComponent" Directory="SERVICEFOLDER" Guid="A9D91CF9-43F6-4227-934B-988D53A4887D">
       <File Id="RemoteTerminalCloudAgentServiceExe" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" KeyPath="yes" />
       <File Id="RemoteTerminalCloudAgentServiceXml" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
+    </Component>
+
+    <Component Id="StartMenuShortcutsComponent" Directory="ProgramMenuDir" Guid="E17EFA2E-DBE4-4950-9BC1-878C20A9A0AF">
+      <Shortcut Id="AgentManagerShortcut"
+        Name="Agent Manager"
+        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" menu'
+        WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="ConfigureAgentShortcut"
+        Name="Configure Agent"
+        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" configure'
+        WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="OpenConfigDirShortcut"
+        Name="Open Config Folder"
+        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" open-config-dir'
+        WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="OpenLogsShortcut"
+        Name="Open Logs"
+        Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+        Arguments='-ExecutionPolicy Bypass -File "[INSTALLFOLDER]manage-agent.ps1" open-logs'
+        WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\RemoteTerminalCloudAgent" Name="StartMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <!--

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/term"
@@ -175,11 +176,12 @@ func PromptAndPersistRegistrationToken(configFilePath string) (*string, error) {
 	}
 
 	fmt.Printf("[remote-terminal-cloud-agent] registration token is not configured. Enter token to save into %s\n", configFilePath)
-	fmt.Print("[remote-terminal-cloud-agent] token (press Enter to skip): ")
+	fmt.Println("[remote-terminal-cloud-agent] token input is hidden for safety. Typed characters will be shown as *.")
+	fmt.Print("[remote-terminal-cloud-agent] token (press Enter to save, empty to skip): ")
 
 	var tokenText string
 	if term.IsTerminal(int(os.Stdin.Fd())) {
-		rawToken, err := term.ReadPassword(int(os.Stdin.Fd()))
+		rawToken, err := readPasswordWithFeedback(int(os.Stdin.Fd()))
 		fmt.Println()
 		if err != nil {
 			return nil, err
@@ -205,6 +207,48 @@ func PromptAndPersistRegistrationToken(configFilePath string) (*string, error) {
 
 	fmt.Printf("[remote-terminal-cloud-agent] token saved to %s\n", configFilePath)
 	return token, nil
+}
+
+func readPasswordWithFeedback(fd int) ([]byte, error) {
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = term.Restore(fd, oldState)
+	}()
+
+	var buffer []byte
+	singleByte := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(singleByte)
+		if err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			continue
+		}
+
+		b := singleByte[0]
+		switch b {
+		case '\r', '\n':
+			return buffer, nil
+		case 3:
+			return nil, fmt.Errorf("input cancelled")
+		case 8, 127:
+			if len(buffer) > 0 {
+				_, size := utf8.DecodeLastRune(buffer)
+				if size <= 0 {
+					size = 1
+				}
+				buffer = buffer[:len(buffer)-size]
+				fmt.Print("\b \b")
+			}
+		default:
+			buffer = append(buffer, b)
+			fmt.Print("*")
+		}
+	}
 }
 
 func HasRegistrationTokenEnvOverride() bool {

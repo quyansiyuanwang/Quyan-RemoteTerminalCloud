@@ -80,6 +80,8 @@ go run ./cmd/rtc-agent doctor
 go run ./cmd/rtc-agent shells
 ```
 
+Windows 安装版建议直接使用开始菜单中的 `Remote Terminal Cloud Agent` 管理入口，不必手动进入安装目录找 `bin\rtc-agent.exe`。
+
 ## Build
 
 构建当前平台 Agent：
@@ -158,6 +160,17 @@ CLI 提供了一组便于排查的本地命令：
 - `rtc-agent status` — 查看主机、shell、SSH、token 等当前状态
 - `rtc-agent doctor` — 输出本地诊断摘要和建议
 - `rtc-agent shells` — 查看 shell 配置与探测结果
+
+## Windows Quick Use
+
+Windows 安装完成后，可以直接从开始菜单打开 `Remote Terminal Cloud Agent` 文件夹，其中包含：
+
+- `Agent Manager` — 打开交互式管理菜单，可查看状态、启动/停止/重启服务、配置 token
+- `Configure Agent` — 直接进入 token 配置向导
+- `Open Config Folder` — 打开配置目录
+- `Open Logs` — 打开日志目录
+
+如果运行 `rtc-agent configure` 或 `rtc-agent conf`，输入 token 时字符会显示为 `*`，这样用户能看到正在输入，但不会明文暴露 token。
 
 ## Release
 

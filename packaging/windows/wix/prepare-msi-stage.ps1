@@ -38,6 +38,7 @@ $BundleWixRoot = Join-Path $BundlePackagingWindowsRoot "wix"
 $BundleInstallScript = Join-Path $BundlePackagingWindowsRoot "install-service.ps1"
 $BundleUninstallScript = Join-Path $BundlePackagingWindowsRoot "uninstall-service.ps1"
 $BundleStopScript = Join-Path $BundlePackagingWindowsRoot "stop-service.ps1"
+$BundleManageScript = Join-Path $BundlePackagingWindowsRoot "manage-agent.ps1"
 $BundleInitScript = Join-Path $BundlePackagingWindowsRoot "init-config.ps1"
 $BundleServiceXml = Join-Path $BundlePackagingWindowsRoot "RemoteTerminalCloudAgentService.xml"
 $BundleWixFile = Join-Path $BundleWixRoot "RemoteTerminalCloudAgent.wxs"
@@ -50,6 +51,7 @@ foreach ($RequiredPath in @(
   $BundleInstallScript,
   $BundleUninstallScript,
   $BundleStopScript,
+  $BundleManageScript,
   $BundleInitScript,
   $BundleServiceXml,
   $BundleWixFile,
