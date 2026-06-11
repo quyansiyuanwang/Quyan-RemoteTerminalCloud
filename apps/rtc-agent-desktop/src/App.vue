@@ -3,12 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-type PreferencesSummary = {
-  defaultWorkingDirectory: string;
-  shortcutsCount: number;
-  quickCommandsCount: number;
-};
-
 type StatusPayload = {
   version: string;
   serverBaseUrl: string;
@@ -23,16 +17,6 @@ type StatusPayload = {
   sshDetail: string;
   platform: string;
   arch: string;
-  configFile: string;
-  preferencesFile: string;
-  preferencesSummary: PreferencesSummary;
-};
-
-type InstallerPaths = {
-  configFile: string;
-  preferencesFile: string;
-  configDir: string;
-  logsDir: string;
 };
 
 type AgentOverview = {
@@ -47,7 +31,6 @@ type AgentOverview = {
 
 type BootstrapPayload = {
   status: StatusPayload;
-  installerPaths: InstallerPaths;
   agent: AgentOverview;
   desktopMode: string;
   onboardingRequired: boolean;
@@ -73,12 +56,7 @@ type AutostartPayload = {
   message: string;
 };
 
-type PathPayload = {
-  path: string;
-};
-
 const status = ref<StatusPayload | null>(null);
-const installerPaths = ref<InstallerPaths | null>(null);
 const agent = ref<AgentOverview | null>(null);
 const token = ref("");
 const loading = ref(false);
@@ -89,7 +67,6 @@ const error = ref("");
 const feedback = ref("");
 const onboardingRequired = ref(false);
 
-const shellSummary = computed(() => status.value?.availableShells.join(", ") || "none");
 const hasToken = computed(() => agent.value?.hasToken ?? false);
 const agentBadge = computed(() => {
   if (agent.value?.running) return "Running";
@@ -101,55 +78,12 @@ const agentBadgeClass = computed(() => {
   if (agent.value?.hasToken) return "is-warning";
   return "is-danger";
 });
-const overviewItems = computed(() => {
-  if (!status.value) return [];
-  return [
-    { label: "版本", value: status.value.version },
-    { label: "平台", value: `${status.value.platform}/${status.value.arch}` },
-    { label: "服务端", value: status.value.serverBaseUrl },
-    { label: "Shell", value: shellSummary.value },
-    { label: "SSH", value: `${status.value.sshAvailable ? "可用" : "不可用"} / ${status.value.sshDetail}` },
-    { label: "Heartbeat", value: status.value.runHeartbeat ? "启用" : "禁用" },
-    { label: "Tunnel", value: status.value.runTunnel ? "启用" : "禁用" },
-    {
-      label: "默认工作目录",
-      value: status.value.preferencesSummary.defaultWorkingDirectory || "未设置",
-    },
-  ];
-});
-const pathItems = computed(() => {
-  if (!installerPaths.value && !status.value) return [];
-  return [
-    {
-      label: "配置文件",
-      value: installerPaths.value?.configFile ?? status.value?.configFile ?? "",
-    },
-    {
-      label: "偏好文件",
-      value: installerPaths.value?.preferencesFile ?? status.value?.preferencesFile ?? "",
-    },
-    {
-      label: "日志目录",
-      value: installerPaths.value?.logsDir ?? "",
-    },
-  ];
-});
-const cliItems = computed(() => [
-  { label: "查看状态", command: "rtc-agent status --json" },
-  { label: "配置 Token", command: "rtc-agent configure" },
-  { label: "连通性验证", command: "rtc-agent verify --json" },
-  { label: "查看路径", command: "rtc-agent paths --json" },
-  { label: "Shell 能力", command: "rtc-agent shells --json" },
-  { label: "服务状态", command: "rtc-agent service status --json" },
-]);
-
 async function refresh() {
   loading.value = true;
   error.value = "";
   try {
     const payload = await invoke<BootstrapPayload>("desktop_bootstrap");
     status.value = payload.status;
-    installerPaths.value = payload.installerPaths;
     agent.value = payload.agent;
     onboardingRequired.value = payload.onboardingRequired;
   } catch (err) {
@@ -214,17 +148,6 @@ async function toggleAutostart() {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     autostartBusy.value = false;
-  }
-}
-
-async function openManagedPath(kind: "configDir" | "logsDir") {
-  error.value = "";
-  feedback.value = "";
-  try {
-    const result = await invoke<PathPayload>("resolve_path", { kind });
-    feedback.value = `已打开：${result.path}`;
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -369,62 +292,6 @@ onUnmounted(() => {
         </button>
       </article>
 
-      <article class="panel panel-span-6">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Runtime Overview</p>
-            <h2>主机与连接状态</h2>
-          </div>
-        </div>
-
-        <div class="info-grid">
-          <div v-for="item in overviewItems" :key="item.label" class="info-cell">
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
-          </div>
-        </div>
-      </article>
-
-      <article class="panel panel-span-3">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Local Paths</p>
-            <h2>本地入口</h2>
-          </div>
-        </div>
-
-        <div class="path-list">
-          <div v-for="item in pathItems" :key="item.label" class="path-item">
-            <span>{{ item.label }}</span>
-            <code>{{ item.value || "--" }}</code>
-          </div>
-        </div>
-
-        <div class="toolbar toolbar-compact">
-          <button class="button button-secondary" @click="openManagedPath('configDir')">
-            打开配置目录
-          </button>
-          <button class="button button-secondary" @click="openManagedPath('logsDir')">
-            打开日志目录
-          </button>
-        </div>
-      </article>
-
-      <article class="panel panel-span-3">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">CLI</p>
-            <h2>命令行可用</h2>
-          </div>
-        </div>
-
-        <div class="cli-list">
-          <div v-for="item in cliItems" :key="item.command" class="cli-item">
-            <span>{{ item.label }}</span>
-            <code>{{ item.command }}</code>
-          </div>
-        </div>
-      </article>
     </section>
   </main>
 </template>

@@ -6,10 +6,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
-use rtc_agent_config::{
-    default_config_file_path, default_preferences_file_path, normalize_template_string,
-    read_config_file,
-};
+use rtc_agent_config::{default_config_file_path, normalize_template_string, read_config_file};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -60,15 +57,6 @@ struct StatusPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct InstallerPaths {
-    config_file: String,
-    preferences_file: String,
-    config_dir: String,
-    logs_dir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ServiceActionResult {
     action: String,
     ok: bool,
@@ -80,12 +68,6 @@ struct ServiceActionResult {
 struct SaveTokenResult {
     ok: bool,
     config_file: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PathResult {
-    path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,7 +86,6 @@ struct AgentOverview {
 #[serde(rename_all = "camelCase")]
 struct BootstrapPayload {
     status: StatusPayload,
-    installer_paths: InstallerPaths,
     agent: AgentOverview,
     desktop_mode: String,
     onboarding_required: bool,
@@ -251,38 +232,12 @@ async fn set_autostart(
     })
 }
 
-#[tauri::command]
-async fn resolve_path(kind: String) -> Result<PathResult, String> {
-    let path = match kind.trim() {
-        "config" | "configDir" => default_config_file_path()
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf(),
-        "logs" | "logsDir" => managed_logs_dir(),
-        other => return Err(format!("Unsupported path kind: {other}")),
-    };
-    let result = PathResult { path: path.display().to_string() };
-    open_path_in_file_manager(&result.path).map_err(|err| err.to_string())?;
-    Ok(result)
-}
-
 async fn build_bootstrap_payload(state: &DesktopState) -> Result<BootstrapPayload> {
     reconcile_agent_state(state).await;
     let status = run_agent_json::<StatusPayload>(&["status", "--json"]).await?;
-    let installer_paths = InstallerPaths {
-        config_file: default_config_file_path().display().to_string(),
-        preferences_file: default_preferences_file_path().display().to_string(),
-        config_dir: default_config_file_path()
-            .parent()
-            .unwrap_or(Path::new("."))
-            .display()
-            .to_string(),
-        logs_dir: managed_logs_dir().display().to_string(),
-    };
     let agent = build_agent_overview(state).await;
     Ok(BootstrapPayload {
         status,
-        installer_paths,
         agent,
         desktop_mode: "tray-background-app".into(),
         onboarding_required: onboarding_required(),
@@ -594,6 +549,22 @@ fn open_path_in_file_manager(path: &str) -> Result<()> {
     command.spawn().map(|_| ()).map_err(|err| anyhow!("failed to open `{path}`: {err}"))
 }
 
+fn managed_logs_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("ProgramData")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        return base.join("RemoteTerminalCloudAgent").join("logs");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        default_config_file_path().parent().unwrap_or(Path::new(".")).join("logs")
+    }
+}
+
 fn has_saved_registration_token() -> bool {
     let env_token = normalize_template_string(env::var("RTC_REGISTRATION_TOKEN").ok());
     if env_token.is_some() {
@@ -824,18 +795,16 @@ async fn handle_menu_event(app: AppHandle, state: Arc<DesktopState>, id: &str) {
             emit_agent_state(&app, &state).await;
         }
         MENU_OPEN_CONFIG => {
-            if let Ok(result) =
-                run_installer_json::<PathResult>(&["windows", "open-config-dir", "--json"]).await
-            {
-                let _ = open_path_in_file_manager(&result.path);
-            }
+            let path = default_config_file_path()
+                .parent()
+                .unwrap_or(Path::new("."))
+                .display()
+                .to_string();
+            let _ = open_path_in_file_manager(&path);
         }
         MENU_OPEN_LOGS => {
-            if let Ok(result) =
-                run_installer_json::<PathResult>(&["windows", "open-logs", "--json"]).await
-            {
-                let _ = open_path_in_file_manager(&result.path);
-            }
+            let path = managed_logs_dir().display().to_string();
+            let _ = open_path_in_file_manager(&path);
         }
         MENU_QUIT => {
             let _ = stop_agent(&state).await;
@@ -879,8 +848,7 @@ pub fn run() {
             desktop_bootstrap,
             save_token,
             desktop_agent_action,
-            set_autostart,
-            resolve_path
+            set_autostart
         ])
         .on_menu_event(move |app, event| {
             let app_handle = app.clone();
