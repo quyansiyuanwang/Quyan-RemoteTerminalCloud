@@ -21,6 +21,8 @@ foreach ($p in @(
   (Join-Path $AgentBundleRoot "packaging\windows\uninstall-service.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\stop-service.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\manage-agent.ps1"),
+  (Join-Path $AgentBundleRoot "packaging\windows\manage-agent-ui.ps1"),
+  (Join-Path $AgentBundleRoot "packaging\windows\launch-manager.vbs"),
   (Join-Path $AgentBundleRoot "packaging\windows\write-config.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\init-config.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\agent.config.json"),

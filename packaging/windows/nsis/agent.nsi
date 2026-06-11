@@ -7,6 +7,8 @@
 ;   packaging\windows\uninstall-service.ps1
 ;   packaging\windows\stop-service.ps1
 ;   packaging\windows\manage-agent.ps1
+;   packaging\windows\manage-agent-ui.ps1
+;   packaging\windows\launch-manager.vbs
 ;   packaging\windows\write-config.ps1
 ;   packaging\windows\agent.config.json
 
@@ -93,6 +95,8 @@ Section "Main" SecMain
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent-ui.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\launch-manager.vbs"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
@@ -112,8 +116,8 @@ Section "Main" SecMain
 
   StrCpy $StartMenuFolder "$SMPROGRAMS\Remote Terminal Cloud Agent"
   CreateDirectory "$StartMenuFolder"
-  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" menu' "$INSTDIR\bin\rtc-agent.exe"
-  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" configure' "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$INSTDIR\launch-manager.vbs" "" "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-NoExit -ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" configure' "$INSTDIR\bin\rtc-agent.exe"
   CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-config-dir' "$INSTDIR\bin\rtc-agent.exe"
   CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-logs' "$INSTDIR\bin\rtc-agent.exe"
 

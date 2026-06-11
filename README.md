@@ -165,8 +165,8 @@ CLI 提供了一组便于排查的本地命令：
 
 Windows 安装完成后，可以直接从开始菜单打开 `Remote Terminal Cloud Agent` 文件夹，其中包含：
 
-- `Agent Manager` — 打开交互式管理菜单，可查看状态、启动/停止/重启服务、配置 token
-- `Configure Agent` — 直接进入 token 配置向导
+- `Agent Manager` — 打开图形化管理器，无需命令行，可查看状态、启动/停止/重启服务、配置 token
+- `Configure Agent` — 直接进入 token 配置向导，会打开可见窗口用于安全输入 token
 - `Open Config Folder` — 打开配置目录
 - `Open Logs` — 打开日志目录
 
