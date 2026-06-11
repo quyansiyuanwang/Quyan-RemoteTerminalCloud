@@ -26,7 +26,8 @@
       "nsis": {
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "template": "nsis/installer.nsi"
       }
     }
   }

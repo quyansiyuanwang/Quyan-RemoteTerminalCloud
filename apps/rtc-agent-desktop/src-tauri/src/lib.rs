@@ -521,12 +521,61 @@ fn binary_file_name(binary_name: &str) -> String {
 
 fn binary_candidate_names(binary_name: &str) -> Vec<String> {
     let mut names = vec![binary_file_name(binary_name)];
+    if let Some(sidecar_name) = sidecar_binary_file_name(binary_name) {
+        names.push(sidecar_name);
+    }
     match binary_name {
-        "rtc-agentd" => names.push(binary_file_name("rtc-agent")),
-        "rtc-agent" => names.push(binary_file_name("rtc-agentd")),
+        "rtc-agentd" => {
+            names.push(binary_file_name("rtc-agent"));
+            if let Some(sidecar_name) = sidecar_binary_file_name("rtc-agent") {
+                names.push(sidecar_name);
+            }
+        }
+        "rtc-agent" => {
+            names.push(binary_file_name("rtc-agentd"));
+            if let Some(sidecar_name) = sidecar_binary_file_name("rtc-agentd") {
+                names.push(sidecar_name);
+            }
+        }
         _ => {}
     }
-    names
+    let mut seen = HashSet::new();
+    names.into_iter().filter(|name| seen.insert(name.clone())).collect()
+}
+
+fn sidecar_binary_file_name(binary_name: &str) -> Option<String> {
+    let target_triple = tauri_sidecar_target_triple()?;
+    let extension = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    Some(format!("{binary_name}-{target_triple}{extension}"))
+}
+
+fn tauri_sidecar_target_triple() -> Option<&'static str> {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        return Some("x86_64-pc-windows-msvc");
+    }
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    {
+        return Some("aarch64-pc-windows-msvc");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        return Some("x86_64-apple-darwin");
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        return Some("aarch64-apple-darwin");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        return Some("x86_64-unknown-linux-gnu");
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        return Some("aarch64-unknown-linux-gnu");
+    }
+    #[allow(unreachable_code)]
+    None
 }
 
 fn open_path_in_file_manager(path: &str) -> Result<()> {
