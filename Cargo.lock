@@ -3329,6 +3329,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "rtc-agent-config",
+ "rtc-agent-service",
  "serde",
  "serde_json",
  "tauri",

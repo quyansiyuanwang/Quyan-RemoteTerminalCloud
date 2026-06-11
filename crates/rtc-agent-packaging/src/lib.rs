@@ -304,12 +304,6 @@ fn windows_desktop_bundle_command(
         &sidecar_dir.join(format!("rtc-agentd-{target_triple}.exe")),
         false,
     )?;
-    build_cli_binary(
-        ctx,
-        "rtc-agent-installer",
-        &sidecar_dir.join(format!("rtc-agent-installer-{target_triple}.exe")),
-        false,
-    )?;
     build_desktop_binary(ctx, &stage_dir)?;
 
     let mut npm = Command::new(node_package_manager_command());
@@ -319,8 +313,7 @@ fn windows_desktop_bundle_command(
     let tauri_config_patch = serde_json::json!({
         "bundle": {
             "externalBin": [
-                sidecar_dir.join("rtc-agentd").display().to_string(),
-                sidecar_dir.join("rtc-agent-installer").display().to_string()
+                sidecar_dir.join("rtc-agentd").display().to_string()
             ],
             "windows": {
                 "nsis": {

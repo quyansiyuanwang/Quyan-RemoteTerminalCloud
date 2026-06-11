@@ -6,7 +6,11 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
-use rtc_agent_config::{default_config_file_path, normalize_template_string, read_config_file};
+use rtc_agent_config::{
+    default_config_file_path, normalize_template_string, persist_registration_token,
+    read_config_file,
+};
+use rtc_agent_service as service;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -57,14 +61,6 @@ struct StatusPayload {
     platform: String,
     arch: String,
     preferences_summary: PreferencesSummary,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ServiceActionResult {
-    action: String,
-    ok: bool,
-    message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,10 +157,11 @@ async fn save_token(
         return Err("Token cannot be empty.".into());
     }
 
-    let result =
-        run_installer_json::<SaveTokenResult>(&["windows", "save-token", token.as_str(), "--json"])
-            .await
-            .map_err(|err| err.to_string())?;
+    persist_registration_token(&default_config_file_path(), &token).map_err(|err| err.to_string())?;
+    let result = SaveTokenResult {
+        ok: true,
+        config_file: Some(default_config_file_path().display().to_string()),
+    };
 
     mark_onboarding_completed().map_err(|err| err.to_string())?;
     ensure_agent_started(&app, &state, true).await.map_err(|err| err.to_string())?;
@@ -274,8 +271,7 @@ async fn ensure_agent_started(
         );
     }
 
-    let service_state =
-        run_installer_json::<ServiceActionResult>(&["windows", "status", "--json"]).await?;
+    let service_state = service::service_status();
     if looks_like_service_running(&service_state.message) {
         bail!(
             "Windows Service appears to be active. Stop the service before using desktop background mode to avoid duplicate agent connections."
@@ -394,13 +390,6 @@ where
     T: DeserializeOwned,
 {
     run_json_command("rtc-agentd", args).await
-}
-
-async fn run_installer_json<T>(args: &[&str]) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    run_json_command("rtc-agent-installer", args).await
 }
 
 async fn run_json_command<T>(binary_name: &str, args: &[&str]) -> Result<T>
