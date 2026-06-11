@@ -32,8 +32,14 @@ type AgentOverview = {
 type BootstrapPayload = {
   status: StatusPayload;
   agent: AgentOverview;
+  recentLogs: AgentLogEntry[];
   desktopMode: string;
   onboardingRequired: boolean;
+};
+
+type AgentLogEntry = {
+  stream: string;
+  line: string;
 };
 
 type ActionPayload = {
@@ -66,6 +72,7 @@ const autostartBusy = ref(false);
 const error = ref("");
 const feedback = ref("");
 const onboardingRequired = ref(false);
+const logs = ref<AgentLogEntry[]>([]);
 
 const hasToken = computed(() => agent.value?.hasToken ?? false);
 const agentBadge = computed(() => {
@@ -85,6 +92,7 @@ async function refresh() {
     const payload = await invoke<BootstrapPayload>("desktop_bootstrap");
     status.value = payload.status;
     agent.value = payload.agent;
+    logs.value = payload.recentLogs ?? [];
     onboardingRequired.value = payload.onboardingRequired;
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
@@ -153,6 +161,7 @@ async function toggleAutostart() {
 
 let unlistenState: UnlistenFn | null = null;
 let unlistenMessage: UnlistenFn | null = null;
+let unlistenLog: UnlistenFn | null = null;
 
 onMounted(async () => {
   await refresh();
@@ -162,11 +171,15 @@ onMounted(async () => {
   unlistenMessage = await listen<string>("desktop://agent-message", (event) => {
     feedback.value = event.payload;
   });
+  unlistenLog = await listen<AgentLogEntry>("desktop://agent-log", (event) => {
+    logs.value = [...logs.value.slice(-299), event.payload];
+  });
 });
 
 onUnmounted(() => {
   unlistenState?.();
   unlistenMessage?.();
+  unlistenLog?.();
 });
 </script>
 
@@ -290,6 +303,28 @@ onUnmounted(() => {
         <button class="button button-primary button-block" @click="saveToken" :disabled="tokenSaving">
           {{ tokenSaving ? "保存中..." : "保存并接管运行" }}
         </button>
+      </article>
+
+      <article class="panel panel-span-12">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">Runtime Console</p>
+            <h2>Agent 状态与日志终端</h2>
+          </div>
+          <span class="panel__hint">这里会直接显示后台 Agent 的运行输出</span>
+        </div>
+
+        <div class="terminal">
+          <div v-if="!logs.length" class="terminal__empty">
+            暂无日志输出。启动后台 Agent 或刷新状态后，这里会显示注册、心跳和错误信息。
+          </div>
+          <div v-for="(entry, index) in logs" :key="`${entry.stream}-${index}-${entry.line}`" class="terminal__line">
+            <span class="terminal__stream" :class="entry.stream === 'stderr' ? 'is-stderr' : 'is-stdout'">
+              {{ entry.stream }}
+            </span>
+            <code>{{ entry.line }}</code>
+          </div>
+        </div>
       </article>
 
     </section>

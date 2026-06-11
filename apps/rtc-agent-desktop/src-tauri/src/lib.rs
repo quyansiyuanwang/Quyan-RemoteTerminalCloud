@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager, State, WindowEvent};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
@@ -84,9 +86,17 @@ struct AgentOverview {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AgentLogEntry {
+    stream: String,
+    line: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct BootstrapPayload {
     status: StatusPayload,
     agent: AgentOverview,
+    recent_logs: Vec<AgentLogEntry>,
     desktop_mode: String,
     onboarding_required: bool,
 }
@@ -133,17 +143,23 @@ impl AgentSupervisor {
 #[derive(Debug)]
 struct DesktopState {
     agent: Mutex<AgentSupervisor>,
+    logs: Mutex<VecDeque<AgentLogEntry>>,
 }
 
 impl DesktopState {
     fn new() -> Self {
-        Self { agent: Mutex::new(AgentSupervisor::new()) }
+        Self { agent: Mutex::new(AgentSupervisor::new()), logs: Mutex::new(VecDeque::new()) }
     }
 }
 
 #[tauri::command]
 async fn desktop_bootstrap(state: State<'_, Arc<DesktopState>>) -> Result<BootstrapPayload, String> {
     build_bootstrap_payload(state.as_ref()).await.map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn desktop_logs(state: State<'_, Arc<DesktopState>>) -> Result<Vec<AgentLogEntry>, String> {
+    Ok(snapshot_logs(state.as_ref()))
 }
 
 #[tauri::command]
@@ -240,6 +256,7 @@ async fn build_bootstrap_payload(state: &DesktopState) -> Result<BootstrapPayloa
     Ok(BootstrapPayload {
         status,
         agent,
+        recent_logs: snapshot_logs(state),
         desktop_mode: "tray-background-app".into(),
         onboarding_required: onboarding_required(),
     })
@@ -292,15 +309,22 @@ async fn ensure_agent_started(
     let mut command = Command::new(&binary);
     command.arg("run");
     command.stdin(Stdio::null());
-    command.stdout(Stdio::null());
-    command.stderr(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
     #[cfg(target_os = "windows")]
     {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let child =
+    let mut child =
         command.spawn().with_context(|| format!("failed to launch `{}`", binary.display()))?;
+    let shared_state = app.state::<Arc<DesktopState>>().inner().clone();
+    if let Some(stdout) = child.stdout.take() {
+        spawn_log_reader(app.clone(), Arc::clone(&shared_state), "stdout", stdout);
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_log_reader(app.clone(), shared_state, "stderr", stderr);
+    }
     agent.child = Some(child);
     agent.desired_running = true;
     drop(agent);
@@ -399,11 +423,14 @@ where
     let candidate_names = binary_candidate_names(binary_name);
     let candidates = resolve_binary_candidates(&candidate_names);
     let binary = resolve_binary(binary_name);
-    let output = Command::new(&binary)
-        .args(args)
-        .output()
-        .await
-        .with_context(|| {
+    let mut command = Command::new(&binary);
+    command.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.output().await.with_context(|| {
             let attempted = candidates
                 .iter()
                 .take(8)
@@ -605,6 +632,41 @@ fn managed_logs_dir() -> PathBuf {
     {
         default_config_file_path().parent().unwrap_or(Path::new(".")).join("logs")
     }
+}
+
+fn snapshot_logs(state: &DesktopState) -> Vec<AgentLogEntry> {
+    state
+        .logs
+        .lock()
+        .map(|logs| logs.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn push_log_entry(state: &DesktopState, entry: AgentLogEntry) {
+    const MAX_LOG_ENTRIES: usize = 300;
+    if let Ok(mut logs) = state.logs.lock() {
+        logs.push_back(entry);
+        while logs.len() > MAX_LOG_ENTRIES {
+            let _ = logs.pop_front();
+        }
+    }
+}
+
+fn spawn_log_reader<R>(app: AppHandle, state: Arc<DesktopState>, stream: &'static str, reader: R)
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(reader).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let entry = AgentLogEntry {
+                stream: stream.into(),
+                line,
+            };
+            push_log_entry(&state, entry.clone());
+            let _ = app.emit("desktop://agent-log", entry);
+        }
+    });
 }
 
 fn has_saved_registration_token() -> bool {
@@ -887,6 +949,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             desktop_bootstrap,
+            desktop_logs,
             save_token,
             desktop_agent_action,
             set_autostart
