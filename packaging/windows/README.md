@@ -21,8 +21,6 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 - `uninstall-service.ps1` — manual uninstall helper for non-MSI scenarios
 - `stop-service.ps1` — upgrade-safe stop helper that waits for the service and child processes to exit
 - `manage-agent.ps1` — user-facing Windows management entry for start/stop/config/log access
-- `manage-agent-ui.ps1` — legacy PowerShell UI kept only as a fallback
-- `launch-manager.vbs` — hidden launcher used by older shortcuts; new installs should open `rtc-agent-manager.exe` directly
 - `bin/rtc-agent-manager.exe` — native Windows manager entry point installed with the product
 - `RemoteTerminalCloudAgentService.xml` — WinSW service definition
 - `download-winsw.ps1` — fetches a WinSW executable for packaging or staging

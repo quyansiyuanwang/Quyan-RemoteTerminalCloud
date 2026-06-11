@@ -7,8 +7,6 @@
 ;   packaging\windows\uninstall-service.ps1
 ;   packaging\windows\stop-service.ps1
 ;   packaging\windows\manage-agent.ps1
-;   packaging\windows\manage-agent-ui.ps1
-;   packaging\windows\launch-manager.vbs
 ;   packaging\windows\write-config.ps1
 ;   packaging\windows\agent.config.json
 
@@ -96,8 +94,6 @@ Section "Main" SecMain
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\manage-agent-ui.ps1"
-  File "${AGENT_BUILD_ROOT}\packaging\windows\launch-manager.vbs"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"

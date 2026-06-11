@@ -79,8 +79,6 @@
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\stop-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\manage-agent.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\manage-agent-ui.ps1" />
-      <Files Include="$(var.AgentBuildRoot)\packaging\windows\launch-manager.vbs" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\write-config.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\init-config.ps1" />
     </ComponentGroup>
