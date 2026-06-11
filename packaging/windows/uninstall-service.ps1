@@ -8,6 +8,7 @@ if (Test-Path (Join-Path $ScriptDir "service\RemoteTerminalCloudAgentService.exe
   throw "Cannot locate install root from $ScriptDir"
 }
 $WinSWExe = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.exe"
+$StopServiceScript = Join-Path $ScriptDir "stop-service.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -17,12 +18,11 @@ if (-not (Test-Path $WinSWExe)) {
 
 Write-Host "Uninstalling Windows service $ServiceName"
 
-Push-Location (Split-Path -Parent $WinSWExe)
-try {
-	& $WinSWExe stop | Out-Null
-} catch {
+if (Test-Path $StopServiceScript) {
+	& $StopServiceScript -InstallRoot $InstallRoot
 }
 
+Push-Location (Split-Path -Parent $WinSWExe)
 & $WinSWExe uninstall
 Pop-Location
 

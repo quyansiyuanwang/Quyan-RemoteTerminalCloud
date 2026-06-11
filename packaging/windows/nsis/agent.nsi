@@ -5,6 +5,7 @@
 ;   service\RemoteTerminalCloudAgentService.xml
 ;   packaging\windows\install-service.ps1
 ;   packaging\windows\uninstall-service.ps1
+;   packaging\windows\stop-service.ps1
 ;   packaging\windows\write-config.ps1
 ;   packaging\windows\agent.config.json
 
@@ -19,7 +20,7 @@ SetCompressor /SOLID lzma
 ; Metadata
 ;--------------------------------
 !ifndef AGENT_VERSION
-  !define AGENT_VERSION "0.1.1"
+  !define AGENT_VERSION "0.2.0"
 !endif
 !ifndef AGENT_BUILD_ROOT
   !error "AGENT_BUILD_ROOT must be defined (e.g. /DAGENT_BUILD_ROOT=...)"
@@ -74,6 +75,10 @@ FunctionEnd
 ; Install
 ;--------------------------------
 Section "Main" SecMain
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\stop-service.ps1 "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
+  nsExec::ExecToLog 'powershell.exe -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-service.ps1" -InstallRoot "$INSTDIR"'
+
   SetOutPath "$INSTDIR"
 
   SetOutPath "$INSTDIR\bin"
@@ -82,6 +87,7 @@ Section "Main" SecMain
   SetOutPath "$INSTDIR"
   File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\uninstall-service.ps1"
+  File "${AGENT_BUILD_ROOT}\packaging\windows\stop-service.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\write-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\init-config.ps1"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"

@@ -19,6 +19,7 @@ foreach ($RequiredPath in @(
   (Join-Path $AgentBuildRoot "bin\rtc-agent.exe"),
   (Join-Path $AgentBuildRoot "packaging\windows\install-service.ps1"),
   (Join-Path $AgentBuildRoot "packaging\windows\uninstall-service.ps1"),
+  (Join-Path $AgentBuildRoot "packaging\windows\stop-service.ps1"),
   (Join-Path $AgentBuildRoot "packaging\windows\write-config.ps1"),
   (Join-Path $AgentBuildRoot "packaging\windows\init-config.ps1"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.exe"),

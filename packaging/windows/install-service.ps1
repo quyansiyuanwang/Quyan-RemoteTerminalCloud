@@ -15,6 +15,7 @@ $WinSWXml = Join-Path $InstallRoot "service\RemoteTerminalCloudAgentService.xml"
 $ConfigDir = Join-Path $env:ProgramData "RemoteTerminalCloudAgent"
 $ConfigFile = Join-Path $ConfigDir "config.json"
 $LogsDir = Join-Path $ConfigDir "logs"
+$StopServiceScript = Join-Path $ScriptDir "stop-service.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -48,9 +49,8 @@ Write-Host "Config file: $ConfigFile"
 Write-Host "Log directory: $LogsDir"
 
 Push-Location (Split-Path -Parent $WinSWExe)
-try {
-  & $WinSWExe stop | Out-Null
-} catch {
+if (Test-Path $StopServiceScript) {
+  & $StopServiceScript -InstallRoot $InstallRoot
 }
 
 try {

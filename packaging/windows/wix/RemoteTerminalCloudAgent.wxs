@@ -3,7 +3,7 @@
   <Package
     Name="Remote Terminal Cloud Agent"
     Manufacturer="Remote Terminal Cloud"
-    Version="0.1.1"
+    Version="0.2.0"
     UpgradeCode="A7A32B15-4E12-4DAB-8B9A-3C91F275AE60"
     InstallerVersion="500"
     Scope="perMachine"
@@ -71,6 +71,7 @@
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent.exe" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
+      <Files Include="$(var.AgentBuildRoot)\packaging\windows\stop-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\write-config.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\init-config.ps1" />
     </ComponentGroup>
@@ -101,6 +102,10 @@
       Execute="deferred" Impersonate="no" Return="check"
       ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]write-config.ps1&quot;" />
 
+    <CustomAction Id="StopExistingService" Directory="INSTALLFOLDER"
+      Execute="deferred" Impersonate="no" Return="ignore"
+      ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]stop-service.ps1&quot; -InstallRoot &quot;[INSTALLFOLDER]&quot;" />
+
     <CustomAction Id="InstallService" Directory="INSTALLFOLDER"
       Execute="deferred" Impersonate="no" Return="check"
       ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]install-service.ps1&quot;" />
@@ -110,6 +115,7 @@
       ExeCommand="powershell.exe -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]uninstall-service.ps1&quot;" />
 
     <InstallExecuteSequence>
+      <Custom Action="StopExistingService" Before="InstallFiles">Installed</Custom>
       <Custom Action="WriteConfig" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="InstallService" After="WriteConfig">NOT Installed</Custom>
       <Custom Action="UninstallService" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
