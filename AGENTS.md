@@ -2,64 +2,60 @@
 
 ## Project Overview
 
-This repository contains the Go-based `Remote Terminal Cloud Agent`.
+This repository is now a `Rust workspace + Tauri` implementation of `Remote Terminal Cloud Agent`.
 
-- Main runtime entry: `cmd/rtc-agent`
-- Windows desktop manager: `cmd/rtc-agent-manager`
-- Release/build pipeline: `cmd/rtc-release`
-- Core runtime logic: `internal/agent`
+- Workspace root: `Cargo.toml`
+- Main apps: `apps/rtc-agentd`, `apps/rtc-agent-installer`, `apps/rtc-agent-desktop`
+- Shared crates: `crates/rtc-agent-*`
+- Build/release entry: `cargo xtask`
 - Packaging assets: `packaging/windows`, `packaging/linux`, `packaging/macos`
 
-The old TypeScript / pnpm agent workspace has already been removed. Assume this is a pure Go project.
+Go is no longer part of the main product implementation.
 
 ## Common Commands
 
-- Build all packages: `go build ./...`
-- Run tests: `go test ./...`
-- Run agent locally: `go run ./cmd/rtc-agent`
-- Show CLI help: `go run ./cmd/rtc-agent help`
-- Build release binaries: `go run ./cmd/rtc-release build`
-- Build release bundle: `go run ./cmd/rtc-release bundle`
-- Build platform artifact: `go run ./cmd/rtc-release artifact`
+- Check Rust workspace: `cargo check`
+- Run Rust agent CLI: `cargo run -p rtc-agentd -- status --json`
+- Run Rust installer CLI: `cargo run -p rtc-agent-installer -- windows status --json`
+- Run Rust release entry: `cargo xtask build`
+- Build desktop frontend: `npm install` then `npm run build` in `apps/rtc-agent-desktop`
 
 ## Product Direction
 
-Current priority is to make the Windows experience feel like a real product instead of a developer tool.
-
-- Prefer native product UX over PowerShell-driven UX
-- `rtc-agent-manager.exe` is the main Windows management entry
-- Keep the background agent/service architecture intact
-- Avoid reintroducing server URL configuration in user-facing flows
-- Registration token setup should be simple, guided, and persistent
+- `rtc-agent-desktop` is the primary product entry on desktop platforms
+- `rtc-agentd` remains the background runtime and CLI surface
+- `rtc-agent-installer` handles config, install, service compatibility, and path helpers
+- `cargo xtask` is the single release/build orchestration entry
+- Prefer native product UX over script-driven UX
 
 ## Windows Notes
 
 - The service name is `RemoteTerminalCloudAgent`
 - Default user config path is `%APPDATA%\remote-terminal-cloud-agent\config.json`
 - Installer upgrades must stop the existing service before overwriting binaries
-- Start Menu shortcuts should point to the native manager wherever possible
-- Avoid visible console windows for the manager in release builds
+- Start Menu shortcuts should point to the desktop manager
+- Avoid visible console windows for user-facing desktop flows
 
 ## Editing Guidelines
 
-- Prefer small, focused changes that preserve the current architecture
-- Use existing helpers in `internal/agent` before adding duplicate logic
-- Keep cross-platform builds working; add Windows-specific files with build tags when needed
+- Prefer Rust-first changes for product behavior
+- Keep scripts thin wrappers around Rust entrypoints
+- Keep cross-platform builds working; gate platform-specific behavior cleanly
 - Treat `build/` and `release/` as disposable output directories
 - Do not commit generated binaries or installer artifacts unless explicitly requested
-- Do not add new business logic or install/runtime logic to PowerShell or bash scripts when it can live in Go
-- Packaging scripts should be thin wrappers around Go binaries, not the source of truth for product behavior
 
 ## Validation Expectations
 
-After meaningful code changes, run:
+After meaningful code changes, run the checks that match the touched stack:
 
-- `go test ./...`
+- `cargo check`
 
-When touching the Windows manager or release flow, also run:
+When touching desktop or release flow, also run:
 
-- `go build ./cmd/rtc-agent-manager`
-- `go run ./cmd/rtc-release build`
+- `cargo run -p rtc-agentd -- version --json`
+- `cargo xtask build`
+- `cargo xtask bundle`
+- `npm run build` in `apps/rtc-agent-desktop`
 
 ## Documentation
 
@@ -67,3 +63,4 @@ If behavior changes for end users, update the relevant docs:
 
 - Root `README.md` for product usage
 - `packaging/windows/README.md` for Windows install/manage behavior
+- `docs/AGENT_DEPLOYMENT_FOUNDATION.md` for deployment/release flow

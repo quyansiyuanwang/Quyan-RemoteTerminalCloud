@@ -4,25 +4,27 @@
 
 ## Status
 
-- 当前仓库已完全切换为纯 `Go` Agent 项目
-- 原来的顶层 TypeScript Agent、`pnpm` 工作区、Node 发布脚本已移除
-- 当前仓库只保留 Go 源码、平台打包脚本和 CI 发布链
+- 当前仓库已切换为 `全 Rust workspace + Tauri`
+- 主程序由 `rtc-agent-desktop` 承担，负责窗口、托盘、开机自启、后台 agent 生命周期
+- 后台运行时由 `rtc-agentd` 承担
+- 安装/配置/Windows 服务辅助由 `rtc-agent-installer` 承担
+- 构建、bundle、artifact、NSIS、MSI 编排统一由 `cargo xtask` 承担
 
 ## Structure
 
-- `cmd/rtc-agent/` — Agent 启动入口
-- `cmd/rtc-agent-installer/` — Windows 原生安装/服务管理入口
-- `cmd/rtc-release/` — 发布目录与平台制品构建入口
-- `internal/agent/` — Agent 运行时主逻辑
-- `internal/protocol/` — Agent 内部共享协议类型
-- `internal/buildinfo/` — 版本与构建信息
+- `apps/rtc-agentd/` — Rust Agent CLI / runtime 入口
+- `apps/rtc-agent-installer/` — Rust 安装/服务管理入口
+- `apps/rtc-agent-desktop/` — Tauri + Vue 桌面管理器
+- `crates/rtc-agent-*` — Rust 共享协议、配置、平台、运行时、服务、打包 crate
+- `xtask/` — Rust 构建与打包入口
 - `packaging/` — Windows / Linux / macOS 安装与服务脚手架
 - `docs/` — 架构、安全、部署、路线图等文档
 - `VERSION` — 当前发布版本号
 
 ## Requirements
 
-- `Go` 1.26+
+- `Rust` 1.92+
+- `Node.js` 24+
 
 如果需要构建原生安装器，还需要：
 
@@ -32,13 +34,7 @@
 
 ## Quick Start
 
-1. 启动你的后端控制面，默认开发地址示例：
-
-```text
-http://localhost:10001
-```
-
-2. 配置 Agent 环境变量：
+1. 配置 Agent 环境变量：
 
 ```env
 RTC_REGISTRATION_TOKEN=dev-registration-token
@@ -53,10 +49,10 @@ RTC_DISABLE_TUNNEL=0
 - `RTC_CONFIG_FILE=/path/to/config.json`
 - `RTC_PREFERENCES_FILE=/path/to/preferences.json`
 
-3. 本地启动 Agent：
+2. 运行 Rust CLI：
 
 ```bash
-go run ./cmd/rtc-agent
+cargo run -p rtc-agentd -- status --json
 ```
 
 如果首次启动时未配置 `RTC_REGISTRATION_TOKEN`，交互式终端下会提示输入 token，并自动保存到默认 `config.json`，后续无需重复填写。
@@ -64,60 +60,57 @@ go run ./cmd/rtc-agent
 也可以单独运行配置向导：
 
 ```bash
-go run ./cmd/rtc-agent configure
-go run ./cmd/rtc-agent conf
+cargo run -p rtc-agentd -- configure
+cargo run -p rtc-agentd -- conf
 ```
 
-常用 CLI 命令：
+常用命令：
 
 ```bash
-go run ./cmd/rtc-agent help
-go run ./cmd/rtc-agent help status
-go run ./cmd/rtc-agent version
-go run ./cmd/rtc-agent paths
-go run ./cmd/rtc-agent config
-go run ./cmd/rtc-agent status
-go run ./cmd/rtc-agent doctor
-go run ./cmd/rtc-agent shells
+cargo run -p rtc-agentd -- --help
+cargo run -p rtc-agentd -- version --json
+cargo run -p rtc-agentd -- paths --json
+cargo run -p rtc-agentd -- config --json
+cargo run -p rtc-agentd -- status --json
+cargo run -p rtc-agentd -- doctor --json
+cargo run -p rtc-agentd -- shells --json
 ```
 
-Windows 安装版建议直接使用开始菜单中的 `Remote Terminal Cloud Agent` 管理入口，不必手动进入安装目录找 `bin\rtc-agent.exe`。
-Windows 安装与服务逻辑现在优先走原生 Go 二进制，而不是把核心行为放在 PowerShell 脚本中。
+Windows 安装版建议直接从开始菜单打开 `Remote Terminal Cloud Agent`，或者使用托盘管理，无需手动进入安装目录寻找 `bin\`。
 
 ## Build
 
-构建当前平台 Agent：
+基础校验：
 
 ```bash
-go build ./...
+cargo check
 ```
 
-运行基础校验：
+桌面端前端构建：
 
 ```bash
-go test ./...
+cd apps/rtc-agent-desktop
+npm install
+npm run build
 ```
 
-构建当前目标平台二进制：
+Rust 发布入口：
 
 ```bash
-go run ./cmd/rtc-release build
+cargo xtask build
+cargo xtask bundle
+cargo xtask artifact
 ```
 
 可通过环境变量指定目标平台：
 
 ```bash
-RTC_TARGET_PLATFORM=linux RTC_TARGET_ARCH=x64 go run ./cmd/rtc-release build
+RTC_TARGET_PLATFORM=linux RTC_TARGET_ARCH=x64 cargo xtask build
 ```
 
 ## Runtime Configuration
 
-Agent 的服务端地址不再由用户配置：
-
-- 本地开发直接运行 `go run ./cmd/rtc-agent` 时固定连接 `http://localhost:10001`
-- 通过 `go run ./cmd/rtc-release build|bundle|artifact` 生成的发布二进制固定连接 `https://api.qysyw.cn`
-
-其余运行参数继续使用“环境变量优先，配置文件兜底”的配置模式。
+发布制品中的服务端地址固定内置为 `https://api.qysyw.cn`，安装和首次使用阶段不再要求用户填写服务器地址。
 
 默认配置文件位置：
 
@@ -148,57 +141,43 @@ Agent 的服务端地址不再由用户配置：
 }
 ```
 
-在交互式终端直接运行 Agent 时，如果 `registrationToken` 和 `RTC_REGISTRATION_TOKEN` 都为空，程序会提示输入 token，并将其写回配置文件；Windows 服务等非交互环境仍保持自动重试，不会阻塞启动。
-
 如需手动更新 token，可使用 `rtc-agent configure` 或 `rtc-agent conf` 启动交互向导并保存到配置文件。
-
-CLI 提供了一组便于排查的本地命令：
-
-- `rtc-agent help` — 查看全部命令
-- `rtc-agent help <command>` — 查看单个命令说明
-- `rtc-agent version` — 查看版本与内置服务端地址
-- `rtc-agent paths` — 查看配置文件、偏好文件和当前工作目录
-- `rtc-agent config` — 查看生效中的运行配置，不输出 token 明文
-- `rtc-agent status` — 查看主机、shell、SSH、token 等当前状态
-- `rtc-agent doctor` — 输出本地诊断摘要和建议
-- `rtc-agent shells` — 查看 shell 配置与探测结果
 
 ## Windows Quick Use
 
 Windows 安装完成后，可以直接从开始菜单打开 `Remote Terminal Cloud Agent` 文件夹，其中包含：
 
-- `Agent Manager` — 打开独立的图形管理器程序，无需命令行，可查看状态和执行常用操作
-- `Configure Agent` — 直接进入 token 配置向导，会打开可见窗口用于安全输入 token
+- `Remote Terminal Cloud Agent` — 默认打开桌面管理器与托盘主程序
+- `Configure Token` — 直接进入 token 配置入口
 - `Open Config Folder` — 打开配置目录
 - `Open Logs` — 打开日志目录
 
-如果运行 `rtc-agent configure` 或 `rtc-agent conf`，输入 token 时字符会显示为 `*`，这样用户能看到正在输入，但不会明文暴露 token。
+桌面端默认负责：
+
+- 首次启动引导
+- token 保存
+- 托盘常驻
+- 后台启动/停止 `rtc-agent`
+- 开机自启
+
+Windows 服务模式已降为可选兼容模式，不再是默认用户路径。
 
 ## Release
 
 版本号由根目录的 `VERSION` 文件提供。
 
-生成发布 bundle：
+统一发布入口：
 
 ```bash
-go run ./cmd/rtc-release bundle
+cargo xtask build
+cargo xtask bundle
+cargo xtask artifact
 ```
 
 输出目录：
 
 ```text
 release/remote-terminal-cloud-agent-<version>/
-```
-
-生成当前目标平台制品：
-
-```bash
-go run ./cmd/rtc-release artifact
-```
-
-输出目录：
-
-```text
 release/artifacts/<platform>-<arch>/
 ```
 
@@ -208,52 +187,83 @@ release/artifacts/<platform>-<arch>/
 - Linux: `tar.gz`、`deb`
 - macOS: `tar.gz`、`pkg`
 
-所有发布制品中的 Agent 二进制都会内置 `https://api.qysyw.cn`，安装阶段不再要求输入服务器地址。
+默认产物位置：
+
+- Windows bundle archive: `release/artifacts/win32-x64/*.zip`
+- Windows NSIS installer: `release/artifacts/windows-installers/nsis/*.exe`
+- Windows MSI installer: `release/artifacts/windows-installers/msi/*.msi`
+- Linux archive/installer: `release/artifacts/linux-x64/`
+- macOS archive/installer: `release/artifacts/darwin-arm64/`
 
 ## Windows Packaging
 
+默认推荐的 Windows 出包顺序：
+
+```bash
+cargo xtask bundle
+cargo xtask windows-nsis-stage --force
+cargo xtask windows-nsis-build
+cargo xtask windows-msi-stage --force
+cargo xtask windows-msi-build --accept-eula
+```
+
 准备 NSIS 安装器输入目录：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\nsis\prepare-installer-stage.ps1 `
-  -AgentBundleRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0" `
-  -Force
+```bash
+cargo xtask windows-nsis-stage \
+  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
+  --force
 ```
 
 构建 NSIS 安装器：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\nsis\build-installer.ps1 `
-  -AgentBuildRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\installer-build-root"
+```bash
+cargo xtask windows-nsis-build \
+  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\installer-build-root"
+```
+
+如未自动发现 `makensis.exe`，可以显式指定：
+
+```bash
+cargo xtask windows-nsis-build \
+  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\installer-build-root" \
+  --nsis-exe "C:\path\to\makensis.exe"
 ```
 
 准备 WiX MSI 输入目录：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\wix\prepare-msi-stage.ps1 `
-  -AgentBundleRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0" `
-  -Force
+```bash
+cargo xtask windows-msi-stage \
+  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
+  --force
 ```
 
 构建 WiX MSI：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\wix\build-msi.ps1 `
-  -AgentBuildRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root" `
-  -OutputDir "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root\artifacts\windows\out"
+```bash
+cargo xtask windows-msi-build \
+  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root" \
+  --output-dir "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root\artifacts\windows\out" \
+  --accept-eula
+```
+
+如需单独下载 WinSW：
+
+```bash
+cargo xtask windows-download-winsw \
+  --target-exe "D:\path\to\RemoteTerminalCloudAgentService.exe" \
+  --force
 ```
 
 ## CI
 
-当前仓库包含：
-
-- `.github/workflows/build-multi-platform.yml`
-
 当前 CI 会：
 
 - 用 `VERSION` 校验发布 tag
-- 用 Go 构建 Linux / macOS / Windows 平台制品
-- 上传归档包与原生安装包
+- Windows 默认构建 desktop-first `NSIS` 与 `MSI`
+- Windows 构建会准备 Node/Rust/NSIS/WiX 所需依赖
+- 统一通过 `cargo xtask` 编排发布
+- 上传 `zip`、`exe`、`msi`、`deb`、`pkg` 并生成统一 `SHA256SUMS.txt`
 - 在 `v*` tag 时自动发布 GitHub Release
 
 ## Notes

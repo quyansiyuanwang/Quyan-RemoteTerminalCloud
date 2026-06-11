@@ -9,17 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$TargetDir = Split-Path -Parent $TargetExe
-$DownloadUrl = "https://github.com/winsw/winsw/releases/download/$Version/WinSW-x64.exe"
+$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+$Arguments = @("xtask", "windows-download-winsw", "--target-exe", $TargetExe, "--winsw-version", $Version)
 
-if (-not (Test-Path $TargetDir)) {
-  New-Item -ItemType Directory -Path $TargetDir | Out-Null
+if ($Force) {
+  $Arguments += "--force"
 }
 
-if ((Test-Path $TargetExe) -and -not $Force) {
-  Write-Host "WinSW already exists at $TargetExe"
-  exit 0
+Push-Location $RepoRoot
+try {
+  & cargo @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "cargo xtask windows-download-winsw failed with exit code $LASTEXITCODE"
+  }
+} finally {
+  Pop-Location
 }
-
-Invoke-WebRequest -Uri $DownloadUrl -OutFile $TargetExe
-Write-Host "Downloaded WinSW to $TargetExe"

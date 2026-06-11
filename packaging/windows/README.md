@@ -1,68 +1,105 @@
 # Windows packaging
 
-This directory contains the Windows packaging scaffolding for the agent.
+This directory contains the Windows packaging scaffolding for the desktop-first product shape.
 
-## Service model
+## Default product model
 
-- Service wrapper: `WinSW`
-- Service id: `RemoteTerminalCloudAgent`
-- Config path: `%ProgramData%\RemoteTerminalCloudAgent\config.json`
-- Logs path: `%ProgramData%\RemoteTerminalCloudAgent\logs`
+- Primary Windows app: `rtc-agent-desktop.exe`
+- Start Menu entry: `Remote Terminal Cloud Agent`
+- Config path: `%APPDATA%\remote-terminal-cloud-agent\config.json`
+- Logs path: `%APPDATA%\remote-terminal-cloud-agent\logs`
 
-The default `config.json` template only leaves `registrationToken` empty. The agent server address is now built into the binary: local development runs connect to `http://localhost:10001`, while packaged release builds connect to `https://api.qysyw.cn`. Until a token is configured, the service will stay installed and keep retrying instead of terminating immediately.
+The default Windows install path is now:
 
-When the agent is launched manually from an interactive terminal and no token is configured yet, it will prompt for the registration token once and save it into the configured `config.json`. The background Windows service remains non-interactive and continues retrying as before.
+- install the desktop manager
+- launch it after install
+- let the desktop app handle first-run token onboarding, tray management, and background agent lifecycle
 
-Core Windows install and management logic now lives in Go binaries. Packaging scripts in this folder are wrappers for staging and installer generation, not the source of truth for install behavior.
+The agent server address is built into release binaries as `https://api.qysyw.cn`. The default `config.json` template only leaves `registrationToken` empty.
+
+## Optional service mode
+
+Windows service mode is no longer the default packaging path.
+
+- `WinSW` remains available for compatibility and migration
+- `RemoteTerminalCloudAgentService.xml` remains in the repo as an optional payload
+- `cargo xtask windows-*-stage` defaults to desktop-first staging without service wrapper files
+- pass `--include-service` only when you explicitly want the legacy service payload in a staged build root
 
 ## Files
 
+- `apps/rtc-agent-desktop/` — Tauri desktop manager
+- `apps/rtc-agent-installer/` — Rust Windows install/admin helper
 - `bin/rtc-agent-installer.exe` — native Windows install/admin helper used by NSIS, WiX, and shortcuts
-- `bin/rtc-agent-manager.exe` — native Windows manager entry point installed with the product
-- `RemoteTerminalCloudAgentService.xml` — WinSW service definition
-- `download-winsw.ps1` — fetches a WinSW executable for packaging or staging
-- `wix/RemoteTerminalCloudAgent.wxs` — WiX v4 MSI authoring skeleton
-- `wix/prepare-msi-stage.ps1` — assembles a real WiX build root from the release bundle
-- `wix/build-msi.ps1` — MSI build helper
+- `bin/rtc-agent-manager.exe` — compatibility manager binary mapped to the desktop app
+- `RemoteTerminalCloudAgentService.xml` — optional WinSW service definition for compatibility mode
+- `wix/RemoteTerminalCloudAgent.wxs` — WiX authoring for desktop-first MSI
+- `nsis/agent.nsi` — NSIS authoring for desktop-first EXE installer
+- `cargo xtask` — preferred staging and installer build entry point
 
-## WiX build-root layout
+## Default staged layout
 
-- `bin/rtc-agent.exe` — compiled agent binary
-- `bin/rtc-agent-installer.exe` — compiled native installer helper
-- `service/RemoteTerminalCloudAgentService.exe` — WinSW binary
-- `service/RemoteTerminalCloudAgentService.xml` — WinSW config
-- `packaging/windows/` — staging templates and build wrappers
-- `artifacts/windows/out/` — default MSI output directory
+Desktop-first `windows-msi-stage` and `windows-nsis-stage` build roots require:
 
-The WiX authoring expects `AgentBuildRoot` to follow this layout exactly.
+- `bin/rtc-agent.exe`
+- `bin/rtc-agent-desktop.exe`
+- `bin/rtc-agent-installer.exe`
+- `bin/rtc-agent-manager.exe`
+- `packaging/windows/`
+- `artifacts/windows/out/`
 
-During upgrade installs, both NSIS and WiX now invoke the native installer helper to stop the existing `RemoteTerminalCloudAgent` service and wait for `rtc-agent.exe` / `RemoteTerminalCloudAgentService.exe` to fully exit before replacing files. This avoids the common "Error opening file for writing" failure during overwrite installs.
+Service wrapper files are optional and only appear when staging with `--include-service`.
 
-The Windows installers also create Start Menu shortcuts so end users can manage the agent without browsing into the install directory manually.
+## Build Windows installers
 
-The primary `Agent Manager` Start Menu entry now launches the native `rtc-agent-manager.exe` window. Token configuration is handled inside the window, so users no longer need to open PowerShell for everyday management.
+Recommended order:
 
-## Build a real MSI
+1. `cargo xtask bundle`
+2. `cargo xtask windows-nsis-stage --force`
+3. `cargo xtask windows-nsis-build`
+4. `cargo xtask windows-msi-stage --force`
+5. `cargo xtask windows-msi-build --accept-eula`
 
-1. Build the agent bundle.
-2. Run `wix/prepare-msi-stage.ps1` against the bundle root.
-3. The staging script will:
-   - copy `bin/rtc-agent.exe`
-   - copy `packaging/windows/`
-   - download WinSW into `service/RemoteTerminalCloudAgentService.exe`
-   - copy `RemoteTerminalCloudAgentService.xml` into `service/`
-4. Build MSI with WiX v4 using `wix/build-msi.ps1`.
+### NSIS
 
-If you are using WiX 7 CLI, `build-msi.ps1 -AcceptEula` will forward the required EULA flag automatically. This flag is not needed for WiX 6.
+```bash
+cargo xtask windows-nsis-stage \
+  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
+  --force
 
-Example:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\wix\prepare-msi-stage.ps1 `
-  -AgentBundleRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0" `
-  -Force
-
-powershell -ExecutionPolicy Bypass -File packaging\windows\wix\build-msi.ps1 `
-  -AgentBuildRoot "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root" `
-  -OutputDir "D:\path\to\remote-terminal-cloud-agent-0.1.0\artifacts\windows\msi-build-root\artifacts\windows\out"
+cargo xtask windows-nsis-build \
+  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\installer-build-root"
 ```
+
+`windows-nsis-build` will first try `PATH`, then probe common `NSIS` install roots including standard `Program Files`, `WinGet`, `Chocolatey`, `Scoop`, and `NSIS_HOME` / `NSIS_ROOT`. If none are found, pass `--nsis-exe <path>`.
+
+### MSI
+
+```bash
+cargo xtask windows-msi-stage \
+  --bundle-root "D:\path\to\remote-terminal-cloud-agent-0.2.0" \
+  --force
+
+cargo xtask windows-msi-build \
+  --build-root "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root" \
+  --output-dir "D:\path\to\remote-terminal-cloud-agent-0.2.0\artifacts\windows\msi-build-root\artifacts\windows\out" \
+  --accept-eula
+```
+
+If you are using WiX 7 CLI, `--accept-eula` is recommended so the Rust wrapper forwards the required EULA flag automatically.
+
+### Outputs
+
+- NSIS default output: `artifacts/windows/installer-build-root/artifacts/windows/out/`
+- MSI default output: `artifacts/windows/msi-build-root/artifacts/windows/out/`
+
+## User-facing behavior
+
+Both NSIS and MSI align to the same default behavior:
+
+- install `rtc-agent-desktop.exe`
+- create Start Menu shortcuts for launch, token configuration, config folder, and logs
+- initialize config if missing
+- launch the desktop app after install
+
+The preferred user path is to manage the product from the desktop window and tray, not by browsing into `bin\` manually.

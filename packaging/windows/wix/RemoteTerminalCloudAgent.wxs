@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
     Name="Remote Terminal Cloud Agent"
     Manufacturer="Remote Terminal Cloud"
@@ -12,44 +13,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Remote Terminal Cloud Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <UIRef Id="WixUI_Minimal" />
-
-    <!-- Inject AgentConfigDlg between LicenseAgreementDlg and VerifyReadyDlg -->
-    <UI>
-      <Dialog Id="AgentConfigDlg" Width="370" Height="270" Title="[ProductName] Setup">
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="yes" Text="WixUI_Bmp_Banner" />
-        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Agent Configuration" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="Enter the registration token for this device." />
-
-        <Control Id="RegTokenLabel" Type="Text" X="25" Y="84" Width="320" Height="10" Text="Registration &amp;Token (optional):" />
-        <Control Id="RegTokenEdit" Type="Edit" X="25" Y="96" Width="320" Height="18" Property="RTC_REG_TOKEN" Password="yes" />
-        <Control Id="RegTokenHint" Type="Text" X="25" Y="117" Width="320" Height="18" Transparent="yes"
-                 Text="{\WixUI_Font_Smaller}Obtain from your server's admin panel. Can be set later in config.json." />
-
-        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-        <Control Id="Back" Type="PushButton" X="180" Y="248" Width="56" Height="17" Text="&amp;Back">
-          <Publish Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
-        </Control>
-        <Control Id="Next" Type="PushButton" X="236" Y="248" Width="56" Height="17" Default="yes" Text="&amp;Next">
-          <Publish Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
-        </Control>
-        <Control Id="Cancel" Type="PushButton" X="304" Y="248" Width="56" Height="17" Cancel="yes" Text="Cancel">
-          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
-        </Control>
-      </Dialog>
-
-      <!-- Override WixUI_Minimal: EULA Next → AgentConfigDlg instead of VerifyReadyDlg -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="AgentConfigDlg" Order="2">LicenseAccepted = "1"</Publish>
-      <!-- Override WixUI_Minimal: VerifyReadyDlg Back → AgentConfigDlg on fresh install -->
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="AgentConfigDlg" Order="2">NOT Installed</Publish>
-    </UI>
-
-    <Property Id="RTC_REG_TOKEN" Secure="yes" Hidden="yes" />
+    <ui:WixUI Id="WixUI_Minimal" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Remote Terminal Cloud Agent">
-        <Directory Id="SERVICEFOLDER" Name="service" />
       </Directory>
     </StandardDirectory>
 
@@ -68,13 +35,13 @@
       <ComponentRef Id="ProgramDataDirectoryComponent" />
       <ComponentRef Id="ProgramDataConfigComponent" />
       <ComponentRef Id="ProgramDataLogsDirectoryComponent" />
-      <ComponentRef Id="ServiceWrapperComponent" />
       <ComponentRef Id="StartMenuShortcutsComponent" />
     </Feature>
 
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent.exe" />
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-manager.exe" />
+      <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-desktop.exe" />
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-installer.exe" />
     </ComponentGroup>
 
@@ -90,19 +57,14 @@
       <CreateFolder />
     </Component>
 
-    <Component Id="ServiceWrapperComponent" Directory="SERVICEFOLDER" Guid="A9D91CF9-43F6-4227-934B-988D53A4887D">
-      <File Id="RemoteTerminalCloudAgentServiceExe" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.exe" KeyPath="yes" />
-      <File Id="RemoteTerminalCloudAgentServiceXml" Source="$(var.AgentBuildRoot)\service\RemoteTerminalCloudAgentService.xml" />
-    </Component>
-
     <Component Id="StartMenuShortcutsComponent" Directory="ProgramMenuDir" Guid="E17EFA2E-DBE4-4950-9BC1-878C20A9A0AF">
-      <Shortcut Id="AgentManagerShortcut"
-        Name="Agent Manager"
-        Target="[INSTALLFOLDER]bin\rtc-agent-manager.exe"
+      <Shortcut Id="DesktopManagerShortcut"
+        Name="Remote Terminal Cloud Agent"
+        Target="[INSTALLFOLDER]bin\rtc-agent-desktop.exe"
         WorkingDirectory="INSTALLFOLDER" />
-      <Shortcut Id="ConfigureAgentShortcut"
-        Name="Configure Agent"
-        Target="[INSTALLFOLDER]bin\rtc-agent-manager.exe"
+      <Shortcut Id="DesktopConfigureShortcut"
+        Name="Configure Token"
+        Target="[INSTALLFOLDER]bin\rtc-agent-desktop.exe"
         WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="OpenConfigDirShortcut"
         Name="Open Config Folder"
@@ -118,28 +80,26 @@
       <RegistryValue Root="HKLM" Key="Software\RemoteTerminalCloudAgent" Name="StartMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <CustomAction Id="StopExistingService" Directory="INSTALLFOLDER"
-      Execute="deferred" Impersonate="no" Return="ignore"
-      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows stop-service &quot;[INSTALLFOLDER]&quot;" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Remote Terminal Cloud Agent" />
 
-    <CustomAction Id="InstallService" Directory="INSTALLFOLDER"
-      Execute="deferred" Impersonate="no" Return="check"
-      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows install-service &quot;[INSTALLFOLDER]&quot; &quot;[RTC_REG_TOKEN]&quot;" />
-
-    <CustomAction Id="UninstallService" Directory="INSTALLFOLDER"
-      Execute="deferred" Impersonate="no" Return="ignore"
-      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows uninstall-service &quot;[INSTALLFOLDER]&quot;" />
+    <CustomAction Id="LaunchDesktopManager"
+      Directory="INSTALLFOLDER"
+      Execute="immediate"
+      Impersonate="yes"
+      Return="asyncNoWait"
+      ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-desktop.exe&quot;" />
 
     <CustomAction Id="InitConfig" Directory="INSTALLFOLDER"
       Execute="deferred" Impersonate="no" Return="check"
       ExeCommand="&quot;[INSTALLFOLDER]bin\rtc-agent-installer.exe&quot; windows init-config" />
 
     <InstallExecuteSequence>
-      <Custom Action="StopExistingService" Before="InstallFiles">Installed</Custom>
-      <Custom Action="InitConfig" After="InstallFiles">NOT Installed</Custom>
-      <Custom Action="InstallService" After="InitConfig">NOT Installed</Custom>
-      <Custom Action="UninstallService" Before="RemoveFiles">Installed AND NOT UPGRADINGPRODUCTCODE</Custom>
+      <Custom Action="InitConfig" After="InstallFiles" Condition="NOT Installed" />
     </InstallExecuteSequence>
+
+    <InstallUISequence>
+      <Custom Action="LaunchDesktopManager" After="ExecuteAction" Condition="NOT Installed AND WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1" />
+    </InstallUISequence>
 
   </Package>
 </Wix>

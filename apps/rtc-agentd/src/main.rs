@@ -1,0 +1,863 @@
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use anyhow::{Result, bail};
+use clap::{ArgAction, Args, Parser, Subcommand};
+use rtc_agent_config::{
+    RuntimeConfig, default_config_file_path, default_preferences_file_path,
+    default_server_base_url, has_registration_token_env_override, persist_registration_token,
+    read_runtime_config,
+};
+use rtc_agent_platform::{
+    ManagerPaths, collect_host_snapshot, detect_available_shells, resolve_default_shell,
+};
+use rtc_agent_preferences::PreferencesStore;
+use rtc_agent_protocol::ShellType;
+use rtc_agent_runtime::{
+    ApiClient, ApiErrorDetails, ApiErrorKind, describe_error, run_agent_tunnel,
+};
+use rtc_agent_service as service;
+use serde::Serialize;
+use tokio::task::JoinSet;
+use tracing_subscriber::EnvFilter;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
+const RUNTIME_RETRY_INTERVAL: Duration = Duration::from_secs(10);
+
+#[derive(Parser)]
+#[command(name = "rtc-agent", version = VERSION, about = "Remote Terminal Cloud Agent")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Configure(JsonFlag),
+    Conf(JsonFlag),
+    Version(JsonFlag),
+    Ver(JsonFlag),
+    Paths(JsonFlag),
+    Path(JsonFlag),
+    Config(JsonFlag),
+    Status(JsonFlag),
+    Doctor(JsonFlag),
+    Diag(JsonFlag),
+    Diagnose(JsonFlag),
+    Verify(JsonFlag),
+    Probe(JsonFlag),
+    Shells(JsonFlag),
+    Shell(JsonFlag),
+    Run,
+    Once,
+    Service(ServiceArgs),
+}
+
+#[derive(Args, Clone, Default)]
+struct JsonFlag {
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ServiceArgs {
+    action: Option<String>,
+    value: Option<String>,
+    #[arg(long, action = ArgAction::SetTrue)]
+    json: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionResponse<'a> {
+    version: &'a str,
+    server_base_url: &'a str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatusResponse {
+    version: String,
+    server_base_url: String,
+    config_file: String,
+    preferences_file: String,
+    registration_token: String,
+    registration_token_source: String,
+    run_heartbeat: bool,
+    run_tunnel: bool,
+    configured_default_shell: String,
+    effective_default_shell: String,
+    available_shells: Vec<String>,
+    ssh_available: bool,
+    ssh_detail: String,
+    platform: String,
+    arch: String,
+    preferences_summary: PreferencesSummary,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PathsResponse {
+    config_file: String,
+    preferences_file: String,
+    config_dir: String,
+    logs_dir: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferencesSummary {
+    default_working_directory: String,
+    shortcuts_count: usize,
+    quick_commands_count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyResponse {
+    ok: bool,
+    server_base_url: String,
+    config_file: String,
+    registration_token_source: String,
+    device_id: String,
+    heartbeat_interval_seconds: i32,
+    websocket_url: String,
+    effective_default_shell: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyErrorResponse {
+    ok: bool,
+    server_base_url: String,
+    config_file: String,
+    registration_token_source: String,
+    effective_default_shell: String,
+    error: VerifyErrorDetails,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyErrorDetails {
+    kind: String,
+    status: Option<u16>,
+    code: Option<i64>,
+    message: String,
+    suggestion: String,
+}
+
+fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_target(false)
+        .init();
+
+    let cli = Cli::parse();
+    let command = cli.command.unwrap_or(Command::Run);
+    match command {
+        Command::Configure(flag) | Command::Conf(flag) => run_configure(flag.json),
+        Command::Version(flag) | Command::Ver(flag) => run_version(flag.json),
+        Command::Paths(flag) | Command::Path(flag) => run_paths(flag.json),
+        Command::Config(flag) => run_config(flag.json),
+        Command::Status(flag) => run_status(flag.json),
+        Command::Doctor(flag) | Command::Diag(flag) | Command::Diagnose(flag) => {
+            run_doctor(flag.json)
+        }
+        Command::Verify(flag) | Command::Probe(flag) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+            runtime.block_on(run_verify(flag.json))
+        }
+        Command::Shells(flag) | Command::Shell(flag) => run_shells(flag.json),
+        Command::Run => {
+            let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+            runtime.block_on(run_agent_forever())
+        }
+        Command::Once => {
+            let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+            runtime.block_on(run_agent_once())
+        }
+        Command::Service(args) => run_service(args),
+    }
+}
+
+fn run_configure(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    println!("[remote-terminal-cloud-agent] config file: {}", config.config_file_path.display());
+    let token = prompt_and_persist_registration_token(&config.config_file_path)?;
+    if as_json {
+        emit_json(&serde_json::json!({
+            "ok": true,
+            "saved": token.is_some(),
+            "configFile": config.config_file_path.display().to_string(),
+        }))
+    } else if token.is_some() {
+        println!("[remote-terminal-cloud-agent] configuration updated successfully.");
+        Ok(())
+    } else {
+        println!("[remote-terminal-cloud-agent] no token saved.");
+        Ok(())
+    }
+}
+
+fn run_version(as_json: bool) -> Result<()> {
+    if as_json {
+        emit_json(&VersionResponse { version: VERSION, server_base_url: default_server_base_url() })
+    } else {
+        println!("rtc-agent version {VERSION}");
+        println!("server base URL: {}", default_server_base_url());
+        Ok(())
+    }
+}
+
+fn run_paths(as_json: bool) -> Result<()> {
+    let paths = manager_paths();
+    if as_json {
+        emit_json(&PathsResponse {
+            config_file: paths.config_file_path.display().to_string(),
+            preferences_file: paths.preferences_path.display().to_string(),
+            config_dir: paths.config_dir.display().to_string(),
+            logs_dir: paths.logs_dir.display().to_string(),
+        })
+    } else {
+        println!("config file: {}", paths.config_file_path.display());
+        println!("preferences file: {}", paths.preferences_path.display());
+        println!("config dir: {}", paths.config_dir.display());
+        println!("logs dir: {}", paths.logs_dir.display());
+        Ok(())
+    }
+}
+
+fn run_config(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    let token_status = if config.registration_token.is_some() { "configured" } else { "missing" };
+    let token_source = if config.registration_token.is_some() {
+        if has_registration_token_env_override() {
+            "environment variable RTC_REGISTRATION_TOKEN"
+        } else {
+            "config file"
+        }
+    } else {
+        "none"
+    };
+    if as_json {
+        emit_json(&serde_json::json!({
+            "serverBaseUrl": config.server_base_url,
+            "registrationToken": token_status,
+            "registrationTokenSource": token_source,
+            "configFile": config.config_file_path.display().to_string(),
+            "preferencesFile": config.preferences_file_path.display().to_string(),
+            "runHeartbeat": config.run_heartbeat,
+            "runTunnel": config.run_tunnel,
+            "defaultShell": config.default_shell_type.as_str(),
+            "enabledShells": config.enabled_shell_types.iter().map(|item| item.as_str()).collect::<Vec<_>>(),
+        }))
+    } else {
+        println!("server base URL: {}", config.server_base_url);
+        println!("registration token: {}", token_status);
+        println!("registration token source: {}", token_source);
+        println!("config file: {}", config.config_file_path.display());
+        println!("preferences file: {}", config.preferences_file_path.display());
+        println!("run heartbeat: {}", config.run_heartbeat);
+        println!("run tunnel: {}", config.run_tunnel);
+        println!("default shell: {}", config.default_shell_type.as_str());
+        println!("enabled shells: {}", join_shells(&config.enabled_shell_types));
+        Ok(())
+    }
+}
+
+fn run_status(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    let effective =
+        resolve_default_shell(config.default_shell_type, &snapshot.diagnostics.available_shells);
+    let response = StatusResponse {
+        version: VERSION.to_owned(),
+        server_base_url: config.server_base_url.clone(),
+        config_file: config.config_file_path.display().to_string(),
+        preferences_file: config.preferences_file_path.display().to_string(),
+        registration_token: if config.registration_token.is_some() {
+            "configured".into()
+        } else {
+            "missing".into()
+        },
+        registration_token_source: if config.registration_token.is_some() {
+            if has_registration_token_env_override() {
+                "environment variable RTC_REGISTRATION_TOKEN".into()
+            } else {
+                "config file".into()
+            }
+        } else {
+            "none".into()
+        },
+        run_heartbeat: config.run_heartbeat,
+        run_tunnel: config.run_tunnel,
+        configured_default_shell: config.default_shell_type.as_str().to_owned(),
+        effective_default_shell: effective.as_str().to_owned(),
+        available_shells: snapshot
+            .diagnostics
+            .available_shells
+            .iter()
+            .map(|item| item.as_str().to_owned())
+            .collect(),
+        ssh_available: snapshot.diagnostics.ssh_check.available,
+        ssh_detail: snapshot.diagnostics.ssh_check.detail.clone(),
+        platform: match snapshot.platform {
+            Some(platform) => {
+                serde_json::to_value(platform)?.as_str().unwrap_or("unknown").to_owned()
+            }
+            None => "unknown".into(),
+        },
+        arch: snapshot.arch.clone(),
+        preferences_summary: read_preferences_summary(&config.preferences_file_path),
+    };
+
+    if as_json {
+        emit_json(&response)
+    } else {
+        println!("agent version: {}", response.version);
+        println!("platform: {}/{}", response.platform, response.arch);
+        println!("server base URL: {}", response.server_base_url);
+        println!("config file: {}", response.config_file);
+        println!("registration token: {}", response.registration_token);
+        println!("heartbeat enabled: {}", response.run_heartbeat);
+        println!("tunnel enabled: {}", response.run_tunnel);
+        println!("configured default shell: {}", response.configured_default_shell);
+        println!("effective default shell: {}", response.effective_default_shell);
+        println!("available shells: {}", response.available_shells.join(", "));
+        println!("ssh available: {}", response.ssh_available);
+        println!("ssh detail: {}", response.ssh_detail);
+        println!(
+            "preferences: cwd=`{}` shortcuts={} quickCommands={}",
+            response.preferences_summary.default_working_directory,
+            response.preferences_summary.shortcuts_count,
+            response.preferences_summary.quick_commands_count
+        );
+        Ok(())
+    }
+}
+
+fn run_doctor(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    if as_json {
+        emit_json(&serde_json::json!({
+            "summary": {
+                "agentVersion": VERSION,
+                "serverBaseUrl": config.server_base_url,
+                "configFile": config.config_file_path.display().to_string(),
+                "preferencesFile": config.preferences_file_path.display().to_string(),
+                "registrationTokenConfigured": config.registration_token.is_some(),
+            },
+            "snapshot": snapshot,
+        }))
+    } else {
+        println!("Doctor summary");
+        println!("- Agent version: {}", VERSION);
+        println!("- Server base URL: {}", config.server_base_url);
+        println!("- Config file: {}", config.config_file_path.display());
+        println!("- Preferences file: {}", config.preferences_file_path.display());
+        println!(
+            "- Registration token: {}",
+            if config.registration_token.is_some() { "configured" } else { "missing" }
+        );
+        println!(
+            "- Available shells: {}",
+            snapshot
+                .diagnostics
+                .available_shells
+                .iter()
+                .map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!("- SSH check: {}", snapshot.diagnostics.ssh_check.detail);
+        Ok(())
+    }
+}
+
+fn run_shells(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    let available = detect_available_shells(&config.enabled_shell_types);
+    let effective = resolve_default_shell(config.default_shell_type, &available);
+    if as_json {
+        emit_json(&serde_json::json!({
+            "configuredDefaultShell": config.default_shell_type.as_str(),
+            "effectiveDefaultShell": effective.as_str(),
+            "enabledShells": config.enabled_shell_types.iter().map(|item| item.as_str()).collect::<Vec<_>>(),
+            "availableShells": available.iter().map(|item| item.as_str()).collect::<Vec<_>>(),
+        }))
+    } else {
+        println!("configured default shell: {}", config.default_shell_type.as_str());
+        println!("effective default shell: {}", effective.as_str());
+        println!("enabled shells: {}", join_shells(&config.enabled_shell_types));
+        println!("detected available shells: {}", join_shells(&available));
+        Ok(())
+    }
+}
+
+fn run_service(args: ServiceArgs) -> Result<()> {
+    let action = args.action.unwrap_or_else(|| "status".into());
+    let value = args.value.unwrap_or_default();
+    let result = match action.as_str() {
+        "install" => service::install_service(
+            "",
+            if value.trim().is_empty() { None } else { Some(value.as_str()) },
+        )?,
+        "uninstall" => service::uninstall_service("")?,
+        "start" => service::start_service()?,
+        "stop" => service::stop_service("")?,
+        "restart" => service::restart_service("")?,
+        "status" => service::service_status(),
+        other => bail!("unknown service action: {other}"),
+    };
+    if args.json {
+        emit_json(&result)
+    } else {
+        println!("{}", result.message);
+        Ok(())
+    }
+}
+
+fn runtime_config() -> RuntimeConfig {
+    read_runtime_config(default_server_base_url())
+}
+
+fn manager_paths() -> ManagerPaths {
+    let config_file_path = default_config_file_path();
+    let config_dir = config_file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let preferences_path = default_preferences_file_path();
+    let logs_dir = managed_logs_dir();
+    ManagerPaths { config_dir, config_file_path, preferences_path, logs_dir }
+}
+
+fn managed_logs_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("ProgramData")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        return base.join("RemoteTerminalCloudAgent").join("logs");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        default_preferences_file_path().parent().unwrap_or(Path::new(".")).join("logs")
+    }
+}
+
+fn read_preferences_summary(path: &Path) -> PreferencesSummary {
+    let store = PreferencesStore::new(path);
+    let preferences = store.get_preferences();
+    PreferencesSummary {
+        default_working_directory: preferences.default_working_directory,
+        shortcuts_count: preferences.shortcuts.len(),
+        quick_commands_count: preferences.quick_commands.len(),
+    }
+}
+
+fn prompt_and_persist_registration_token(path: &Path) -> Result<Option<String>> {
+    println!(
+        "[remote-terminal-cloud-agent] registration token is not configured. Enter token to save into {}",
+        path.display()
+    );
+    print!("[remote-terminal-cloud-agent] token (press Enter to save, empty to skip): ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let token = input.trim().to_owned();
+    if token.is_empty() {
+        return Ok(None);
+    }
+    persist_registration_token(path, &token)?;
+    println!("[remote-terminal-cloud-agent] token saved to {}", path.display());
+    Ok(Some(token))
+}
+
+fn join_shells(items: &[ShellType]) -> String {
+    if items.is_empty() {
+        "none".into()
+    } else {
+        items.iter().map(|item| item.as_str()).collect::<Vec<_>>().join(", ")
+    }
+}
+
+fn emit_json<T: Serialize>(value: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+async fn run_verify(as_json: bool) -> Result<()> {
+    let config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    let effective_default_shell =
+        resolve_default_shell(config.default_shell_type, &snapshot.diagnostics.available_shells);
+
+    let Some(registration_token) = config.registration_token.clone() else {
+        let message = "Registration token is missing. Run `rtc-agent configure` or set RTC_REGISTRATION_TOKEN first.";
+        if as_json {
+            return emit_json(&VerifyErrorResponse {
+                ok: false,
+                server_base_url: config.server_base_url.clone(),
+                config_file: config.config_file_path.display().to_string(),
+                registration_token_source: "none".into(),
+                effective_default_shell: effective_default_shell.as_str().to_owned(),
+                error: VerifyErrorDetails {
+                    kind: "missing-token".into(),
+                    status: None,
+                    code: None,
+                    message: message.into(),
+                    suggestion:
+                        "Open `rtc-agent configure`, paste a valid token, and try verify again."
+                            .into(),
+                },
+            });
+        }
+        bail!(message);
+    };
+
+    let token_source = if has_registration_token_env_override() {
+        "environment variable RTC_REGISTRATION_TOKEN".to_owned()
+    } else {
+        "config file".to_owned()
+    };
+
+    let api_client = ApiClient::default();
+    let session = match api_client
+        .register_agent(&config.server_base_url, &registration_token, snapshot)
+        .await
+    {
+        Ok(session) => session,
+        Err(err) => {
+            return emit_verify_error(
+                as_json,
+                &config.server_base_url,
+                &config.config_file_path,
+                &token_source,
+                effective_default_shell,
+                err,
+            );
+        }
+    };
+    let websocket_url =
+        match rtc_agent_runtime::verify_websocket_connectivity(&config.server_base_url, &session)
+            .await
+        {
+            Ok(url) => url,
+            Err(err) => {
+                return emit_verify_error(
+                    as_json,
+                    &config.server_base_url,
+                    &config.config_file_path,
+                    &token_source,
+                    effective_default_shell,
+                    err,
+                );
+            }
+        };
+
+    let response = VerifyResponse {
+        ok: true,
+        server_base_url: config.server_base_url.clone(),
+        config_file: config.config_file_path.display().to_string(),
+        registration_token_source: token_source,
+        device_id: session.device_id,
+        heartbeat_interval_seconds: session.heartbeat_interval_seconds,
+        websocket_url,
+        effective_default_shell: effective_default_shell.as_str().to_owned(),
+    };
+
+    if as_json {
+        emit_json(&response)
+    } else {
+        println!("verify ok: true");
+        println!("server base URL: {}", response.server_base_url);
+        println!("config file: {}", response.config_file);
+        println!("registration token source: {}", response.registration_token_source);
+        println!("device id: {}", response.device_id);
+        println!("heartbeat interval seconds: {}", response.heartbeat_interval_seconds);
+        println!("websocket URL: {}", response.websocket_url);
+        println!("effective default shell: {}", response.effective_default_shell);
+        Ok(())
+    }
+}
+
+async fn run_agent_forever() -> Result<()> {
+    loop {
+        if let Err(err) = run_agent_once().await {
+            print_runtime_error("[remote-terminal-cloud-agent] runtime error", &err);
+            eprintln!(
+                "[remote-terminal-cloud-agent] the agent will retry automatically in {} seconds.",
+                RUNTIME_RETRY_INTERVAL.as_secs()
+            );
+            tokio::time::sleep(RUNTIME_RETRY_INTERVAL).await;
+        }
+    }
+}
+
+async fn run_agent_once() -> Result<()> {
+    let mut config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    let effective_default_shell =
+        resolve_default_shell(config.default_shell_type, &snapshot.diagnostics.available_shells);
+
+    println!("[remote-terminal-cloud-agent] config file: {}", config.config_file_path.display());
+    println!("[remote-terminal-cloud-agent] host snapshot");
+    emit_json(&snapshot)?;
+    println!(
+        "[remote-terminal-cloud-agent] shell capabilities: {}",
+        join_shells(&snapshot.diagnostics.available_shells)
+    );
+
+    if effective_default_shell != config.default_shell_type {
+        println!(
+            "[remote-terminal-cloud-agent] RTC_DEFAULT_SHELL={} is unavailable; fallback to {}.",
+            config.default_shell_type.as_str(),
+            effective_default_shell.as_str()
+        );
+    }
+    if snapshot.diagnostics.available_shells.is_empty() {
+        println!(
+            "[remote-terminal-cloud-agent] no shells available after detection/config filtering."
+        );
+    }
+    if !snapshot.diagnostics.ssh_check.available {
+        println!("[remote-terminal-cloud-agent] SSH precheck failed.");
+    }
+
+    if config.registration_token.is_none() && is_interactive_input_available() {
+        config.registration_token =
+            prompt_and_persist_registration_token(&config.config_file_path)?;
+    }
+
+    let Some(registration_token) = config.registration_token.clone() else {
+        if is_interactive_input_available() {
+            println!(
+                "[remote-terminal-cloud-agent] registration token is still empty. Update {} or set RTC_REGISTRATION_TOKEN, then the agent will retry automatically.",
+                config.config_file_path.display()
+            );
+        } else {
+            println!(
+                "[remote-terminal-cloud-agent] waiting for configuration: set RTC_REGISTRATION_TOKEN in {} or environment, then the service will retry automatically.",
+                config.config_file_path.display()
+            );
+        }
+        tokio::time::sleep(MISSING_CONFIG_RETRY).await;
+        return Ok(());
+    };
+
+    let api_client = ApiClient::default();
+    let session = match api_client
+        .register_agent(&config.server_base_url, &registration_token, snapshot)
+        .await
+    {
+        Ok(session) => session,
+        Err(err) => {
+            print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
+            return Err(err);
+        }
+    };
+    println!("[remote-terminal-cloud-agent] registered device {}", session.device_id);
+
+    if !config.run_heartbeat && !config.run_tunnel {
+        println!(
+            "[remote-terminal-cloud-agent] heartbeat and tunnel are both disabled; retrying later."
+        );
+        tokio::time::sleep(MISSING_CONFIG_RETRY).await;
+        return Ok(());
+    }
+
+    let mut tasks = JoinSet::<Result<()>>::new();
+
+    if config.run_heartbeat {
+        let api_client = api_client.clone();
+        let server_base_url = config.server_base_url.clone();
+        let enabled_shell_types = config.enabled_shell_types.clone();
+        let logs_dir = logs_dir.clone();
+        let mut heartbeat_session = session.clone();
+        tasks.spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(
+                    heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
+                ))
+                .await;
+
+                let heartbeat_snapshot = collect_host_snapshot(
+                    VERSION,
+                    &enabled_shell_types,
+                    logs_dir.display().to_string(),
+                )?;
+                heartbeat_session = api_client
+                    .send_heartbeat(&server_base_url, &heartbeat_session, heartbeat_snapshot)
+                    .await
+                    .map_err(|err| {
+                        print_runtime_error("[remote-terminal-cloud-agent] heartbeat failed", &err);
+                        err
+                    })?;
+                println!(
+                    "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
+                    heartbeat_session.device_id, heartbeat_session.heartbeat_interval_seconds
+                );
+            }
+        });
+    } else {
+        println!("[remote-terminal-cloud-agent] heartbeat disabled by RTC_DISABLE_HEARTBEAT=1");
+    }
+
+    if config.run_tunnel {
+        let server_base_url = config.server_base_url.clone();
+        let preferences_file_path = config.preferences_file_path.clone();
+        tasks.spawn(async move {
+            run_agent_tunnel(
+                &server_base_url,
+                session,
+                effective_default_shell,
+                &preferences_file_path,
+            )
+            .await
+        });
+    } else {
+        println!("[remote-terminal-cloud-agent] tunnel disabled by RTC_DISABLE_TUNNEL=1");
+    }
+
+    match tasks.join_next().await {
+        Some(result) => result??,
+        None => bail!("agent runtime exited without active tasks"),
+    }
+
+    Ok(())
+}
+
+fn is_interactive_input_available() -> bool {
+    io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+fn emit_verify_error(
+    as_json: bool,
+    server_base_url: &str,
+    config_file: &Path,
+    registration_token_source: &str,
+    effective_default_shell: ShellType,
+    err: anyhow::Error,
+) -> Result<()> {
+    if let Some(details) = describe_error(&err) {
+        if as_json {
+            return emit_json(&VerifyErrorResponse {
+                ok: false,
+                server_base_url: server_base_url.to_owned(),
+                config_file: config_file.display().to_string(),
+                registration_token_source: registration_token_source.to_owned(),
+                effective_default_shell: effective_default_shell.as_str().to_owned(),
+                error: VerifyErrorDetails::from(details),
+            });
+        }
+
+        eprintln!("verify ok: false");
+        eprintln!("server base URL: {server_base_url}");
+        eprintln!("config file: {}", config_file.display());
+        eprintln!("registration token source: {registration_token_source}");
+        eprintln!("effective default shell: {}", effective_default_shell.as_str());
+        eprintln!("reason: {}", user_label_for_error_kind(&details.kind));
+        eprintln!("message: {}", details.message);
+        eprintln!("suggestion: {}", details.suggestion);
+        return Ok(());
+    }
+
+    if as_json {
+        return emit_json(&VerifyErrorResponse {
+            ok: false,
+            server_base_url: server_base_url.to_owned(),
+            config_file: config_file.display().to_string(),
+            registration_token_source: registration_token_source.to_owned(),
+            effective_default_shell: effective_default_shell.as_str().to_owned(),
+            error: VerifyErrorDetails {
+                kind: "unexpected".into(),
+                status: None,
+                code: None,
+                message: err.to_string(),
+                suggestion:
+                    "Retry once. If it still fails, capture the JSON output and inspect the backend and local network path.".into(),
+            },
+        });
+    }
+
+    eprintln!("verify ok: false");
+    eprintln!("server base URL: {server_base_url}");
+    eprintln!("config file: {}", config_file.display());
+    eprintln!("registration token source: {registration_token_source}");
+    eprintln!("effective default shell: {}", effective_default_shell.as_str());
+    eprintln!("reason: unexpected error");
+    eprintln!("message: {err}");
+    eprintln!(
+        "suggestion: Retry once. If it still fails, inspect the backend and local network path."
+    );
+    Ok(())
+}
+
+fn print_runtime_error(prefix: &str, err: &anyhow::Error) {
+    if let Some(details) = describe_error(err) {
+        eprintln!("{prefix}: {}", details.message);
+        eprintln!("[remote-terminal-cloud-agent] suggestion: {}", details.suggestion);
+    } else {
+        eprintln!("{prefix}: {err}");
+    }
+}
+
+fn user_label_for_error_kind(kind: &ApiErrorKind) -> &'static str {
+    match kind {
+        ApiErrorKind::InvalidToken => "invalid or expired token",
+        ApiErrorKind::DeviceLimitReached => "device limit reached",
+        ApiErrorKind::GatewayUnavailable => "backend gateway unavailable",
+        ApiErrorKind::ProxyConfiguration => "proxy or gateway issue",
+        ApiErrorKind::WebsocketUnavailable => "websocket connection unavailable",
+        ApiErrorKind::Unauthorized => "backend rejected credentials",
+        ApiErrorKind::ServerRejected => "backend rejected request",
+        ApiErrorKind::Transport => "network transport issue",
+        ApiErrorKind::Unexpected => "unexpected error",
+    }
+}
+
+impl From<ApiErrorDetails> for VerifyErrorDetails {
+    fn from(value: ApiErrorDetails) -> Self {
+        Self {
+            kind: match value.kind {
+                ApiErrorKind::InvalidToken => "invalid-token",
+                ApiErrorKind::DeviceLimitReached => "device-limit-reached",
+                ApiErrorKind::GatewayUnavailable => "gateway-unavailable",
+                ApiErrorKind::ProxyConfiguration => "proxy-configuration",
+                ApiErrorKind::WebsocketUnavailable => "websocket-unavailable",
+                ApiErrorKind::Unauthorized => "unauthorized",
+                ApiErrorKind::ServerRejected => "server-rejected",
+                ApiErrorKind::Transport => "transport",
+                ApiErrorKind::Unexpected => "unexpected",
+            }
+            .into(),
+            status: value.status,
+            code: value.code,
+            message: value.message,
+            suggestion: value.suggestion,
+        }
+    }
+}

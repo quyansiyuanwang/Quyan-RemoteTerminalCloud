@@ -1,9 +1,8 @@
 ; Remote Terminal Cloud Agent - NSIS Installer
 ; Build root layout (AgentBuildRoot):
 ;   bin\rtc-agent.exe - compiled agent binary
+;   bin\rtc-agent-desktop.exe - Tauri desktop manager
 ;   bin\rtc-agent-installer.exe - native installer helper
-;   service\RemoteTerminalCloudAgentService.exe
-;   service\RemoteTerminalCloudAgentService.xml
 ;   packaging\windows\agent.config.json
 
 Unicode true
@@ -23,9 +22,12 @@ SetCompressor /SOLID lzma
 !ifndef AGENT_BUILD_ROOT
   !error "AGENT_BUILD_ROOT must be defined (e.g. /DAGENT_BUILD_ROOT=...)"
 !endif
+!ifndef AGENT_OUTPUT_DIR
+  !define AGENT_OUTPUT_DIR "${AGENT_BUILD_ROOT}\artifacts\windows\out"
+!endif
 
 Name "Remote Terminal Cloud Agent"
-OutFile "${AGENT_BUILD_ROOT}\artifacts\windows\out\RemoteTerminalCloudAgentSetup-${AGENT_VERSION}.exe"
+OutFile "${AGENT_OUTPUT_DIR}\RemoteTerminalCloudAgentSetup-${AGENT_VERSION}.exe"
 InstallDir "$PROGRAMFILES64\Remote Terminal Cloud Agent"
 InstallDirRegKey HKLM "Software\RemoteTerminalCloudAgent" "InstallDir"
 RequestExecutionLevel admin
@@ -75,23 +77,16 @@ FunctionEnd
 ; Install
 ;--------------------------------
 Section "Main" SecMain
-  InitPluginsDir
-  File /oname=$PLUGINSDIR\rtc-agent-installer.exe "${AGENT_BUILD_ROOT}\bin\rtc-agent-installer.exe"
-  nsExec::ExecToLog '"$PLUGINSDIR\rtc-agent-installer.exe" windows stop-service "$INSTDIR"'
-
   SetOutPath "$INSTDIR"
 
   SetOutPath "$INSTDIR\bin"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent.exe"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent-manager.exe"
+  File "${AGENT_BUILD_ROOT}\bin\rtc-agent-desktop.exe"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent-installer.exe"
 
   SetOutPath "$INSTDIR"
   File "${AGENT_BUILD_ROOT}\packaging\windows\agent.config.json"
-
-  SetOutPath "$INSTDIR\service"
-  File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.exe"
-  File "${AGENT_BUILD_ROOT}\service\RemoteTerminalCloudAgentService.xml"
 
   ; Initialize ProgramData config directory and copy default config
   nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows init-config'
@@ -101,15 +96,13 @@ Section "Main" SecMain
     nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows save-token "$RegToken"'
   ${EndIf}
 
-  ; Install and start service
-  nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows install-service "$INSTDIR" "$RegToken"'
-
   StrCpy $StartMenuFolder "$SMPROGRAMS\Remote Terminal Cloud Agent"
   CreateDirectory "$StartMenuFolder"
-  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$INSTDIR\bin\rtc-agent-manager.exe" "" "$INSTDIR\bin\rtc-agent-manager.exe"
-  CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$INSTDIR\bin\rtc-agent-manager.exe" "" "$INSTDIR\bin\rtc-agent-manager.exe"
+  CreateShortCut "$StartMenuFolder\Remote Terminal Cloud Agent.lnk" "$INSTDIR\bin\rtc-agent-desktop.exe" "" "$INSTDIR\bin\rtc-agent-desktop.exe"
+  CreateShortCut "$StartMenuFolder\Configure Token.lnk" "$INSTDIR\bin\rtc-agent-desktop.exe" "" "$INSTDIR\bin\rtc-agent-desktop.exe"
   CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$INSTDIR\bin\rtc-agent-installer.exe" 'windows open-config-dir' "$INSTDIR\bin\rtc-agent-installer.exe"
   CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$INSTDIR\bin\rtc-agent-installer.exe" 'windows open-logs' "$INSTDIR\bin\rtc-agent-installer.exe"
+  Exec '"$INSTDIR\bin\rtc-agent-desktop.exe"'
 
   ; Uninstaller + registry
   WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -124,7 +117,6 @@ SectionEnd
 ; Uninstall
 ;--------------------------------
 Section "Uninstall"
-  nsExec::ExecToLog '"$INSTDIR\bin\rtc-agent-installer.exe" windows uninstall-service "$INSTDIR"'
   RMDir /r "$SMPROGRAMS\Remote Terminal Cloud Agent"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\RemoteTerminalCloudAgent"

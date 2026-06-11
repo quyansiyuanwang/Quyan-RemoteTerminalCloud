@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "serverBaseUrl": "https://api.qysyw.cn",
+  "registrationToken": "configured",
+  "registrationTokenSource": "config file",
+  "runHeartbeat": true,
+  "runTunnel": true,
+  "configuredDefaultShell": "system-default",
+  "effectiveDefaultShell": "system-default",
+  "availableShells": ["system-default", "powershell", "pwsh", "cmd"],
+  "sshAvailable": true,
+  "sshDetail": "sshd service status probe will be implemented in Rust runtime.",
+  "platform": "windows",
+  "arch": "x86_64",
+  "configFile": "C:\\Users\\user\\AppData\\Roaming\\remote-terminal-cloud-agent\\config.json",
+  "preferencesFile": "C:\\Users\\user\\AppData\\Roaming\\remote-terminal-cloud-agent\\preferences.json"
+}
+
