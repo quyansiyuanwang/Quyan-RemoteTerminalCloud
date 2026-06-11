@@ -28,7 +28,8 @@ type releaseConfig struct {
 	targetArch      string
 	goos            string
 	goarch          string
-	binaryName      string
+	agentBinaryName string
+	managerBinaryName string
 	releaseRoot     string
 	bundleRoot      string
 	platformOutRoot string
@@ -95,9 +96,11 @@ func newReleaseConfig(root string) releaseConfig {
 		goarch = "amd64"
 	}
 
-	binaryName := "rtc-agent"
+	agentBinaryName := "rtc-agent"
+	managerBinaryName := "rtc-agent-manager"
 	if targetPlatform == "win32" {
-		binaryName += ".exe"
+		agentBinaryName += ".exe"
+		managerBinaryName += ".exe"
 	}
 
 	releaseRoot := filepath.Join(root, "release")
@@ -113,7 +116,8 @@ func newReleaseConfig(root string) releaseConfig {
 		targetArch:      targetArch,
 		goos:            goos,
 		goarch:          goarch,
-		binaryName:      binaryName,
+		agentBinaryName: agentBinaryName,
+		managerBinaryName: managerBinaryName,
 		releaseRoot:     releaseRoot,
 		bundleRoot:      bundleRoot,
 		platformOutRoot: platformOutRoot,
@@ -128,18 +132,34 @@ func buildBinary(cfg releaseConfig) error {
 		return err
 	}
 
-	outputPath := filepath.Join(outputDir, cfg.binaryName)
 	ldflags := fmt.Sprintf("-X github.com/remote-terminal-cloud/agent/internal/buildinfo.ServerBaseURL=%s", releaseServerBaseURL)
-	cmd := exec.Command("go", "build", "-ldflags", ldflags, "-o", outputPath, "./cmd/rtc-agent")
-	cmd.Dir = cfg.projectRoot
-	cmd.Env = append(os.Environ(),
-		"GOOS="+cfg.goos,
-		"GOARCH="+cfg.goarch,
-		"CGO_ENABLED=0",
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	for _, target := range []struct {
+		outputPath string
+		packagePath string
+		guiBinary   bool
+	}{
+		{outputPath: filepath.Join(outputDir, cfg.agentBinaryName), packagePath: "./cmd/rtc-agent"},
+		{outputPath: filepath.Join(outputDir, cfg.managerBinaryName), packagePath: "./cmd/rtc-agent-manager", guiBinary: cfg.goos == "windows"},
+	} {
+		targetLdflags := ldflags
+		if target.guiBinary {
+			targetLdflags += " -H=windowsgui"
+		}
+		args := []string{"build", "-ldflags", targetLdflags, "-o", target.outputPath, target.packagePath}
+		cmd := exec.Command("go", args...)
+		cmd.Dir = cfg.projectRoot
+		cmd.Env = append(os.Environ(),
+			"GOOS="+cfg.goos,
+			"GOARCH="+cfg.goarch,
+			"CGO_ENABLED=0",
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildBundle(cfg releaseConfig) error {
@@ -158,8 +178,12 @@ func buildBundle(cfg releaseConfig) error {
 		return err
 	}
 
-	sourceBinary := filepath.Join(cfg.projectRoot, "build", "bin", fmt.Sprintf("%s-%s", cfg.targetPlatform, cfg.targetArch), cfg.binaryName)
-	if err := copyFile(sourceBinary, filepath.Join(cfg.bundleRoot, "bin", cfg.binaryName)); err != nil {
+	sourceAgentBinary := filepath.Join(cfg.projectRoot, "build", "bin", fmt.Sprintf("%s-%s", cfg.targetPlatform, cfg.targetArch), cfg.agentBinaryName)
+	if err := copyFile(sourceAgentBinary, filepath.Join(cfg.bundleRoot, "bin", cfg.agentBinaryName)); err != nil {
+		return err
+	}
+	sourceManagerBinary := filepath.Join(cfg.projectRoot, "build", "bin", fmt.Sprintf("%s-%s", cfg.targetPlatform, cfg.targetArch), cfg.managerBinaryName)
+	if err := copyFile(sourceManagerBinary, filepath.Join(cfg.bundleRoot, "bin", cfg.managerBinaryName)); err != nil {
 		return err
 	}
 
@@ -182,7 +206,8 @@ func buildBundle(cfg releaseConfig) error {
 	return writeJSON(filepath.Join(cfg.bundleRoot, "bundle.json"), map[string]any{
 		"name":    "rtc-agent",
 		"version": cfg.version,
-		"binary":  filepath.ToSlash(filepath.Join("bin", cfg.binaryName)),
+		"binary":  filepath.ToSlash(filepath.Join("bin", cfg.agentBinaryName)),
+		"managerBinary": filepath.ToSlash(filepath.Join("bin", cfg.managerBinaryName)),
 	})
 }
 
@@ -211,7 +236,8 @@ func buildArtifact(cfg releaseConfig) error {
 		"targetArch":          cfg.targetArch,
 		"archiveFile":         archiveFileName(cfg),
 		"nativeInstallerFile": nativeInstallerFileName(cfg),
-		"binaryPath":          filepath.ToSlash(filepath.Join("bin", cfg.binaryName)),
+		"binaryPath":          filepath.ToSlash(filepath.Join("bin", cfg.agentBinaryName)),
+		"managerBinaryPath":   filepath.ToSlash(filepath.Join("bin", cfg.managerBinaryName)),
 		"startCommand":        startCommand(cfg),
 	}); err != nil {
 		return err
@@ -226,7 +252,7 @@ func buildArtifact(cfg releaseConfig) error {
 		"Server base URL: " + releaseServerBaseURL,
 		"",
 		"This artifact contains:",
-		"- bin/ Go agent binary",
+		"- bin/ Go agent and manager binaries",
 		"- packaging/ platform service installation templates",
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(cfg.stageRoot, "README.txt"), []byte(readme), 0o644); err != nil {
@@ -295,9 +321,9 @@ func nativeInstallerFileName(cfg releaseConfig) any {
 
 func startCommand(cfg releaseConfig) string {
 	if cfg.targetPlatform == "win32" {
-		return ".\\bin\\" + cfg.binaryName
+		return ".\\bin\\" + cfg.agentBinaryName
 	}
-	return "./bin/" + cfg.binaryName
+	return "./bin/" + cfg.agentBinaryName
 }
 
 func copyTree(src string, dst string) error {

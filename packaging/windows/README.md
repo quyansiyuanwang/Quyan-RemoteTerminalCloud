@@ -21,8 +21,9 @@ The MSI now installs the Windows service via standard WiX `ServiceInstall` / `Se
 - `uninstall-service.ps1` — manual uninstall helper for non-MSI scenarios
 - `stop-service.ps1` — upgrade-safe stop helper that waits for the service and child processes to exit
 - `manage-agent.ps1` — user-facing Windows management entry for start/stop/config/log access
-- `manage-agent-ui.ps1` — graphical Windows manager for everyday user operations
-- `launch-manager.vbs` — hidden launcher used by Start Menu shortcuts to avoid a visible console flash
+- `manage-agent-ui.ps1` — legacy PowerShell UI kept only as a fallback
+- `launch-manager.vbs` — hidden launcher used by older shortcuts; new installs should open `rtc-agent-manager.exe` directly
+- `bin/rtc-agent-manager.exe` — native Windows manager entry point installed with the product
 - `RemoteTerminalCloudAgentService.xml` — WinSW service definition
 - `download-winsw.ps1` — fetches a WinSW executable for packaging or staging
 - `wix/RemoteTerminalCloudAgent.wxs` — WiX v4 MSI authoring skeleton
@@ -43,7 +44,7 @@ During upgrade installs, both NSIS and WiX now stop the existing `RemoteTerminal
 
 The Windows installers also create Start Menu shortcuts so end users can manage the agent without browsing into the install directory manually.
 
-The primary `Agent Manager` Start Menu entry now launches a graphical manager without showing a black console window first. Token configuration still opens an interactive terminal window intentionally, so the masked input flow remains obvious and reliable.
+The primary `Agent Manager` Start Menu entry now launches the native `rtc-agent-manager.exe` window. Token configuration is handled inside the window, so users no longer need to open PowerShell for everyday management.
 
 ## Build a real MSI
 

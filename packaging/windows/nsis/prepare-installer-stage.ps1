@@ -17,6 +17,7 @@ $StageRoot = Resolve-AbsolutePath $StageRoot
 
 foreach ($p in @(
   (Join-Path $AgentBundleRoot "bin\rtc-agent.exe"),
+  (Join-Path $AgentBundleRoot "bin\rtc-agent-manager.exe"),
   (Join-Path $AgentBundleRoot "packaging\windows\install-service.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\uninstall-service.ps1"),
   (Join-Path $AgentBundleRoot "packaging\windows\stop-service.ps1"),
@@ -47,6 +48,7 @@ foreach ($d in @(
 )) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 
 Copy-Item (Join-Path $AgentBundleRoot "bin\rtc-agent.exe")                  (Join-Path $StageRoot "bin\rtc-agent.exe") -Force
+Copy-Item (Join-Path $AgentBundleRoot "bin\rtc-agent-manager.exe")          (Join-Path $StageRoot "bin\rtc-agent-manager.exe") -Force
 Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\*")                (Join-Path $StageRoot "packaging\windows") -Recurse -Force
 Copy-Item (Join-Path $AgentBundleRoot "packaging\windows\RemoteTerminalCloudAgentService.xml") `
                                                                         (Join-Path $StageRoot "service\RemoteTerminalCloudAgentService.xml") -Force

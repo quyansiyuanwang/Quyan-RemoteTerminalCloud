@@ -74,6 +74,7 @@
 
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent.exe" />
+      <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-manager.exe" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\install-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\uninstall-service.ps1" />
       <Files Include="$(var.AgentBuildRoot)\packaging\windows\stop-service.ps1" />
@@ -104,7 +105,7 @@
     <Component Id="StartMenuShortcutsComponent" Directory="ProgramMenuDir" Guid="E17EFA2E-DBE4-4950-9BC1-878C20A9A0AF">
       <Shortcut Id="AgentManagerShortcut"
         Name="Agent Manager"
-        Target="[INSTALLFOLDER]launch-manager.vbs"
+        Target="[INSTALLFOLDER]bin\rtc-agent-manager.exe"
         WorkingDirectory="INSTALLFOLDER" />
       <Shortcut Id="ConfigureAgentShortcut"
         Name="Configure Agent"

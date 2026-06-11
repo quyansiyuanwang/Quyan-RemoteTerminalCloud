@@ -19,6 +19,7 @@ if (-not $Version) { $Version = "0.0.0" }
 
 foreach ($RequiredPath in @(
   (Join-Path $AgentBuildRoot "bin\rtc-agent.exe"),
+  (Join-Path $AgentBuildRoot "bin\rtc-agent-manager.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.exe"),
   (Join-Path $AgentBuildRoot "service\RemoteTerminalCloudAgentService.xml"),
   (Join-Path $AgentBuildRoot "packaging\windows\install-service.ps1"),

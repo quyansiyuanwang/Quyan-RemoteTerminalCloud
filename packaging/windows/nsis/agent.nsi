@@ -89,6 +89,7 @@ Section "Main" SecMain
 
   SetOutPath "$INSTDIR\bin"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent.exe"
+  File "${AGENT_BUILD_ROOT}\bin\rtc-agent-manager.exe"
 
   SetOutPath "$INSTDIR"
   File "${AGENT_BUILD_ROOT}\packaging\windows\install-service.ps1"
@@ -116,7 +117,7 @@ Section "Main" SecMain
 
   StrCpy $StartMenuFolder "$SMPROGRAMS\Remote Terminal Cloud Agent"
   CreateDirectory "$StartMenuFolder"
-  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$INSTDIR\launch-manager.vbs" "" "$INSTDIR\bin\rtc-agent.exe"
+  CreateShortCut "$StartMenuFolder\Agent Manager.lnk" "$INSTDIR\bin\rtc-agent-manager.exe" "" "$INSTDIR\bin\rtc-agent-manager.exe"
   CreateShortCut "$StartMenuFolder\Configure Agent.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-NoExit -ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" configure' "$INSTDIR\bin\rtc-agent.exe"
   CreateShortCut "$StartMenuFolder\Open Config Folder.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-config-dir' "$INSTDIR\bin\rtc-agent.exe"
   CreateShortCut "$StartMenuFolder\Open Logs.lnk" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" '-ExecutionPolicy Bypass -File "$INSTDIR\manage-agent.ps1" open-logs' "$INSTDIR\bin\rtc-agent.exe"

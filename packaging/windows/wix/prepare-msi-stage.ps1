@@ -48,6 +48,7 @@ $BundleWinSWDownloader = Join-Path $BundlePackagingWindowsRoot "download-winsw.p
 
 foreach ($RequiredPath in @(
   (Join-Path $BundleBinRoot "rtc-agent.exe"),
+  (Join-Path $BundleBinRoot "rtc-agent-manager.exe"),
   $BundlePackagingWindowsRoot,
   $BundleWixRoot,
   $BundleInstallScript,
@@ -93,6 +94,7 @@ foreach ($DirectoryPath in @(
 }
 
 Copy-Item -Path (Join-Path $BundleBinRoot "rtc-agent.exe") -Destination (Join-Path $StageBinRoot "rtc-agent.exe") -Force
+Copy-Item -Path (Join-Path $BundleBinRoot "rtc-agent-manager.exe") -Destination (Join-Path $StageBinRoot "rtc-agent-manager.exe") -Force
 Copy-Item -Path (Join-Path $BundlePackagingWindowsRoot "*") -Destination $StagePackagingWindowsRoot -Recurse -Force
 Copy-Item -Path $BundleServiceXml -Destination (Join-Path $StageServiceRoot "RemoteTerminalCloudAgentService.xml") -Force
 
