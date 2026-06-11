@@ -11,6 +11,8 @@ This directory contains the first-pass Windows service and MSI scaffolding for t
 
 The default `config.json` template only leaves `registrationToken` empty. The agent server address is now built into the binary: local development runs connect to `http://localhost:10001`, while packaged release builds connect to `https://api.qysyw.cn`. Until a token is configured, the service will stay installed and keep retrying instead of terminating immediately.
 
+When the agent is launched manually from an interactive terminal and no token is configured yet, it will prompt for the registration token once and save it into the configured `config.json`. The background Windows service remains non-interactive and continues retrying as before.
+
 The MSI now installs the Windows service via standard WiX `ServiceInstall` / `ServiceControl` tables instead of launching PowerShell custom actions during install.
 
 ## Files

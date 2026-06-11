@@ -1,13 +1,16 @@
 package agent
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/joho/godotenv"
+	"golang.org/x/term"
 
 	"github.com/remote-terminal-cloud/agent/internal/buildinfo"
 	"github.com/remote-terminal-cloud/agent/internal/protocol"
@@ -156,6 +159,72 @@ func readConfigFile(path string) fileConfig {
 	cfg.RegistrationToken = normalizeTemplateString(cfg.RegistrationToken)
 	cfg.PreferencesFilePath = strings.TrimSpace(cfg.PreferencesFilePath)
 	return cfg
+}
+
+func IsInteractiveInputAvailable() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+func PromptAndPersistRegistrationToken(configFilePath string) (*string, error) {
+	if !IsInteractiveInputAvailable() {
+		return nil, nil
+	}
+
+	fmt.Printf("[remote-terminal-cloud-agent] registration token is not configured. Enter token to save into %s\n", configFilePath)
+	fmt.Print("[remote-terminal-cloud-agent] token (press Enter to skip): ")
+
+	var tokenText string
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		rawToken, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err != nil {
+			return nil, err
+		}
+		tokenText = string(rawToken)
+	} else {
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		tokenText = line
+	}
+
+	token := normalizeTemplateString(stringPtr(tokenText))
+	if token == nil {
+		return nil, nil
+	}
+
+	if err := persistRegistrationToken(configFilePath, *token); err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("[remote-terminal-cloud-agent] token saved to %s\n", configFilePath)
+	return token, nil
+}
+
+func persistRegistrationToken(configFilePath string, token string) error {
+	cfg := readConfigFile(configFilePath)
+	cfg.RegistrationToken = stringPtr(token)
+
+	content, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(configFilePath), 0o755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(configFilePath, content, 0o644)
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func GetRuntimeConfig() RuntimeConfig {

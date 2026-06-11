@@ -58,6 +58,8 @@ RTC_DISABLE_TUNNEL=0
 go run ./cmd/rtc-agent
 ```
 
+如果首次启动时未配置 `RTC_REGISTRATION_TOKEN`，交互式终端下会提示输入 token，并自动保存到默认 `config.json`，后续无需重复填写。
+
 ## Build
 
 构建当前平台 Agent：
@@ -121,6 +123,8 @@ Agent 的服务端地址不再由用户配置：
   "preferencesFilePath": "/var/lib/remote-terminal-cloud-agent/preferences.json"
 }
 ```
+
+在交互式终端直接运行 Agent 时，如果 `registrationToken` 和 `RTC_REGISTRATION_TOKEN` 都为空，程序会提示输入 token，并将其写回配置文件；Windows 服务等非交互环境仍保持自动重试，不会阻塞启动。
 
 ## Release
 

@@ -55,7 +55,21 @@ func runAgentOnce(ctx context.Context, agentVersion string) error {
 	}
 
 	if config.RegistrationToken == nil {
-		fmt.Printf("[remote-terminal-cloud-agent] waiting for configuration: set RTC_REGISTRATION_TOKEN in %s or environment, then the service will retry automatically.\n", config.ConfigFilePath)
+		token, err := agent.PromptAndPersistRegistrationToken(config.ConfigFilePath)
+		if err != nil {
+			return err
+		}
+		if token != nil {
+			config.RegistrationToken = token
+		}
+	}
+
+	if config.RegistrationToken == nil {
+		if agent.IsInteractiveInputAvailable() {
+			fmt.Printf("[remote-terminal-cloud-agent] registration token is still empty. Update %s or set RTC_REGISTRATION_TOKEN, then the agent will retry automatically.\n", config.ConfigFilePath)
+		} else {
+			fmt.Printf("[remote-terminal-cloud-agent] waiting for configuration: set RTC_REGISTRATION_TOKEN in %s or environment, then the service will retry automatically.\n", config.ConfigFilePath)
+		}
 		time.Sleep(missingConfigRetry)
 		return nil
 	}
