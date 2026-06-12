@@ -268,7 +268,79 @@ fn package_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
     let result = artifact_command(ctx)?;
     let mut details = result.details;
     details.insert("mode".into(), "artifact".into());
+
+    if ctx.target_platform == "darwin" {
+        match darwin_desktop_bundle_command(ctx) {
+            Ok(dmg_details) => {
+                details.extend(dmg_details);
+                details.insert("desktopBundle".into(), "dmg".into());
+            }
+            Err(e) => {
+                eprintln!("[xtask] WARNING: macOS desktop bundle build failed (non-fatal): {e}");
+                details.insert("desktopBundleError".into(), e.to_string());
+            }
+        }
+    }
+
     Ok(success("package", "Platform package built.", details))
+}
+
+fn darwin_desktop_bundle_command(ctx: &PackagingContext) -> Result<BTreeMap<String, String>> {
+    let desktop_dir = ctx.project_root.join("apps").join("rtc-agent-desktop");
+
+    let mut npm = Command::new(node_package_manager_command());
+    npm.current_dir(&desktop_dir).arg("run").arg("build");
+    apply_release_build_env(&mut npm);
+    run_command(&mut npm, "desktop frontend build failed")?;
+
+    let clean_dir = ctx.project_root.join("target").join("release").join("bundle");
+    if clean_dir.exists() {
+        fs::remove_dir_all(&clean_dir)
+            .with_context(|| format!("remove stale {}", clean_dir.display()))?;
+    }
+
+    let mut tauri = Command::new(node_package_manager_command());
+    tauri
+        .current_dir(&desktop_dir)
+        .arg("run")
+        .arg("tauri")
+        .arg("--")
+        .arg("build")
+        .arg("--bundles")
+        .arg("dmg")
+        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
+    apply_release_build_env(&mut tauri);
+    run_command(&mut tauri, "tauri desktop bundle failed")?;
+
+    let dmg_dir = ctx.project_root.join("target").join("release").join("bundle").join("dmg");
+    let mut details = BTreeMap::new();
+    if dmg_dir.exists() {
+        for entry in fs::read_dir(&dmg_dir).context("read dmg bundle directory")? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "dmg") {
+                let target = ctx.platform_out_root.join(
+                    entry.file_name(),
+                );
+                copy_file(&path, &target)?;
+                details.insert("dmg".into(), target.display().to_string());
+            }
+        }
+    }
+
+    let macos_dir = ctx.project_root.join("target").join("release").join("bundle").join("macOS");
+    if macos_dir.exists() {
+        for entry in fs::read_dir(&macos_dir).context("read macOS bundle directory")? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "app") {
+                let target = ctx.platform_out_root.join(entry.file_name());
+                copy_tree(&path, &target)?;
+                details.insert("app".into(), target.display().to_string());
+            }
+        }
+    }
+    Ok(details)
 }
 
 fn windows_desktop_bundle_command(
@@ -713,6 +785,7 @@ fn env_or(name: &str, fallback: &str) -> String {
 fn normalize_target_platform(value: String) -> String {
     match value.as_str() {
         "windows" => "win32".into(),
+        "macos" => "darwin".into(),
         "win32" | "linux" | "darwin" => value,
         _ => env::consts::OS.to_owned(),
     }
