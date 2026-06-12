@@ -41,6 +41,13 @@ pub struct RuntimeConfig {
 
 pub fn ensure_dotenv_loaded() {
     DOTENV_ONCE.get_or_init(|| {
+        let should_load = env::var("RTC_LOAD_DOTENV")
+            .ok()
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        if !should_load {
+            return;
+        }
         for candidate in dotenv_candidates() {
             if candidate.is_file() {
                 let _ = dotenvy::from_path(candidate);
@@ -198,7 +205,7 @@ pub fn read_runtime_config(server_base_url: &str) -> RuntimeConfig {
 }
 
 pub fn default_server_base_url() -> &'static str {
-    option_env!("RTC_AGENT_SERVER_BASE_URL").unwrap_or(LOCAL_SERVER_BASE_URL)
+    option_env!("RTC_AGENT_SERVER_BASE_URL").unwrap_or(RELEASE_SERVER_BASE_URL)
 }
 
 pub fn read_config_file(path: &Path) -> FileConfig {

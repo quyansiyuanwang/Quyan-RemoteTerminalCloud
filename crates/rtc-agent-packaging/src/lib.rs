@@ -11,6 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use rtc_agent_config::RELEASE_SERVER_BASE_URL;
+use serde_json::Value;
 use serde::Serialize;
 use tar::Builder as TarBuilder;
 use time::format_description::well_known::Rfc3339;
@@ -351,6 +352,11 @@ fn windows_desktop_bundle_command(
         copy_tree(&tauri_bundle_root, &output_dir)?;
     }
 
+    validate_release_server_url(
+        &sidecar_dir.join(format!("rtc-agentd-{target_triple}.exe")),
+        "windows sidecar rtc-agentd",
+    )?;
+
     let mut details = BTreeMap::new();
     details.insert("outputDir".into(), output_dir.display().to_string());
     details.insert("bundles".into(), bundles.to_owned());
@@ -379,8 +385,8 @@ fn build_cli_binary(
         .arg("--release")
         .arg("-p")
         .arg(package_name)
-        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL)
         .env("CARGO_TARGET_DIR", ctx.project_root.join("target"));
+    apply_release_build_env(&mut cmd);
 
     if ctx.os_name != env::consts::OS || normalize_host_arch(env::consts::ARCH) != ctx.target_arch {
         let target = rust_target_triple(ctx)?;
@@ -403,6 +409,9 @@ fn build_cli_binary(
             output_path.display()
         )
     })?;
+    if package_name == "rtc-agentd" {
+        validate_release_server_url(output_path, package_name)?;
+    }
     Ok(())
 }
 
@@ -410,6 +419,7 @@ fn build_desktop_binary(ctx: &PackagingContext, output_dir: &Path) -> Result<()>
     let desktop_dir = ctx.project_root.join("apps").join("rtc-agent-desktop");
     let mut npm = Command::new(node_package_manager_command());
     npm.current_dir(&desktop_dir).arg("run").arg("build");
+    apply_release_build_env(&mut npm);
     run_command(&mut npm, "desktop frontend build failed")?;
 
     let mut cargo = Command::new("cargo");
@@ -419,8 +429,8 @@ fn build_desktop_binary(ctx: &PackagingContext, output_dir: &Path) -> Result<()>
         .arg("--release")
         .arg("-p")
         .arg("rtc-agent-desktop")
-        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL)
         .env("CARGO_TARGET_DIR", ctx.project_root.join("target"));
+    apply_release_build_env(&mut cargo);
     run_command(&mut cargo, "desktop Rust build failed")?;
 
     let source = ctx
@@ -647,6 +657,58 @@ fn run_command(cmd: &mut Command, context_message: &str) -> Result<()> {
     let status = cmd.status().with_context(|| context_message.to_owned())?;
     if !status.success() {
         bail!("{context_message}: exited with status {status}");
+    }
+    Ok(())
+}
+
+fn apply_release_build_env(cmd: &mut Command) {
+    cmd.env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
+    for name in [
+        "RTC_SERVER_BASE_URL",
+        "RTC_REGISTRATION_TOKEN",
+        "RTC_LOAD_DOTENV",
+        "RTC_CONFIG_FILE",
+        "RTC_PREFERENCES_FILE",
+        "RTC_DEFAULT_SHELL",
+        "RTC_ENABLED_SHELLS",
+        "RTC_DISABLE_HEARTBEAT",
+        "RTC_DISABLE_TUNNEL",
+    ] {
+        cmd.env_remove(name);
+    }
+}
+
+fn validate_release_server_url(binary_path: &Path, label: &str) -> Result<()> {
+    let mut cmd = Command::new(binary_path);
+    cmd.arg("version").arg("--json");
+    apply_release_build_env(&mut cmd);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let output = cmd
+        .output()
+        .with_context(|| format!("run {label} version check: {}", binary_path.display()))?;
+    if !output.status.success() {
+        bail!(
+            "{label} version check failed with status {}. stdout: {} stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let payload: Value = serde_json::from_slice(&output.stdout).with_context(|| {
+        format!(
+            "decode {label} version JSON from {}",
+            binary_path.display()
+        )
+    })?;
+    let actual = payload
+        .get("serverBaseUrl")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if actual != RELEASE_SERVER_BASE_URL {
+        bail!(
+            "{label} compiled with unexpected server base URL `{actual}`; expected `{RELEASE_SERVER_BASE_URL}`"
+        );
     }
     Ok(())
 }

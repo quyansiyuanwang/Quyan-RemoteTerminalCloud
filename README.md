@@ -203,6 +203,9 @@ release/artifacts/<platform>-<arch>/
 cargo xtask package
 ```
 
+这条链现在会强制使用生产环境后端 `https://api.qysyw.cn`，并在构建后做一次产物自检。
+本机 `.env`、`RTC_SERVER_BASE_URL`、`RTC_REGISTRATION_TOKEN` 等开发环境变量不会再污染正式打包结果。
+
 默认产物会落在：
 
 ```text

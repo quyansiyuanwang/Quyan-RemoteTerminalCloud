@@ -198,7 +198,7 @@ async fn desktop_agent_action(
             ensure_agent_started(&app, &state, true).await.map_err(|err| err.to_string())?;
             desktop_agent_result(
                 "start",
-                "Agent is now running in desktop background mode.",
+                "Agent process started. Registration is still in progress; check the log panel for `registered device` or backend errors.",
                 &state,
             )
             .await
@@ -209,8 +209,12 @@ async fn desktop_agent_action(
         }
         "restart" => {
             restart_agent(&app, &state, true).await.map_err(|err| err.to_string())?;
-            desktop_agent_result("restart", "Desktop background agent has been restarted.", &state)
-                .await
+            desktop_agent_result(
+                "restart",
+                "Agent process restarted. Registration is still in progress; check the log panel for `registered device` or backend errors.",
+                &state,
+            )
+            .await
         }
         "status" => {
             reconcile_agent_state(&state).await;
@@ -329,7 +333,10 @@ async fn ensure_agent_started(
     agent.desired_running = true;
     drop(agent);
 
-    let _ = app.emit("desktop://agent-message", "Desktop background agent started.");
+    let _ = app.emit(
+        "desktop://agent-message",
+        "Agent process started. Registration is still in progress; check the log panel for `registered device` or backend errors.",
+    );
     Ok(())
 }
 
@@ -395,7 +402,7 @@ async fn build_agent_overview(state: &DesktopState) -> AgentOverview {
         has_token,
         token_source,
         status_summary: if running {
-            "Running in tray background mode.".into()
+            "Agent process is running. Registration and heartbeat results are shown in the log panel.".into()
         } else if has_token {
             "Ready to start in tray background mode.".into()
         } else {
