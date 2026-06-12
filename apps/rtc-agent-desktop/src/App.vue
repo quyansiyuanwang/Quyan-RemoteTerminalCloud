@@ -63,6 +63,8 @@ type AutostartPayload = {
   message: string;
 };
 
+const REFRESH_INTERVAL_MS = 8000;
+
 const status = ref<StatusPayload | null>(null);
 const agent = ref<AgentOverview | null>(null);
 const token = ref("");
@@ -77,6 +79,23 @@ const logs = ref<AgentLogEntry[]>([]);
 const logsText = computed(() =>
   logs.value.map((entry) => `[${entry.stream}] ${entry.line}`).join("\n"),
 );
+const primaryFacts = computed(() => [
+  {
+    key: "pid",
+    label: "PID",
+    value: agent.value?.pid ? String(agent.value.pid) : "--",
+  },
+  {
+    key: "shell",
+    label: "默认 Shell",
+    value: status.value?.effectiveDefaultShell ?? "--",
+  },
+  {
+    key: "token-source",
+    label: "Token 来源",
+    value: agent.value?.tokenSource ?? "--",
+  },
+]);
 
 const hasToken = computed(() => agent.value?.hasToken ?? false);
 const runtimeState = computed(() => {
@@ -175,7 +194,10 @@ const agentBadgeClass = computed(() => {
   return "is-danger";
 });
 async function refresh() {
-  loading.value = true;
+  const shouldShowLoading = !status.value && !agent.value;
+  if (shouldShowLoading) {
+    loading.value = true;
+  }
   error.value = "";
   try {
     const payload = await invoke<BootstrapPayload>("desktop_bootstrap");
@@ -251,9 +273,13 @@ async function toggleAutostart() {
 let unlistenState: UnlistenFn | null = null;
 let unlistenMessage: UnlistenFn | null = null;
 let unlistenLog: UnlistenFn | null = null;
+let refreshTimer: number | null = null;
 
 onMounted(async () => {
   await refresh();
+  refreshTimer = window.setInterval(() => {
+    void refresh();
+  }, REFRESH_INTERVAL_MS);
   unlistenState = await listen<AgentOverview>("desktop://agent-state", (event) => {
     agent.value = event.payload;
   });
@@ -266,6 +292,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
   unlistenState?.();
   unlistenMessage?.();
   unlistenLog?.();
@@ -284,6 +314,7 @@ onUnmounted(() => {
       </div>
       <div class="topbar__actions">
         <span class="status-pill" :class="agentBadgeClass">{{ agentBadge }}</span>
+        <span class="sync-hint">本地每 {{ REFRESH_INTERVAL_MS / 1000 }} 秒自动刷新</span>
         <button class="button button-secondary" @click="refresh" :disabled="loading">
           {{ loading ? "刷新中..." : "刷新状态" }}
         </button>
@@ -317,26 +348,8 @@ onUnmounted(() => {
       </article>
     </section>
 
-    <section class="summary-grid">
-      <article class="summary-card">
-        <span class="summary-card__label">Agent 状态</span>
-        <strong>{{ runtimeState.label }}</strong>
-        <p>{{ agent?.statusSummary ?? "正在读取后台状态" }}</p>
-      </article>
-      <article class="summary-card">
-        <span class="summary-card__label">Token 来源</span>
-        <strong>{{ agent?.tokenSource ?? "none" }}</strong>
-        <p>{{ hasToken ? "已具备连接条件，可直接接管运行。" : "尚未配置 token，后台代理不会启动。" }}</p>
-      </article>
-      <article class="summary-card">
-        <span class="summary-card__label">开机自启</span>
-        <strong>{{ agent?.autostartEnabled ? "已启用" : "未启用" }}</strong>
-        <p>登录当前用户后自动启动桌面管理器并驻留托盘。</p>
-      </article>
-    </section>
-
     <section class="workspace-grid">
-      <article class="panel panel-span-7">
+      <article class="panel panel-span-8">
         <div class="panel__header">
           <div>
             <p class="panel__eyebrow">Agent Control</p>
@@ -372,7 +385,7 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <div class="inline-kpis">
+        <div class="inline-kpis inline-kpis--four">
           <div class="inline-kpi">
             <span>期望状态</span>
             <strong>{{ agent?.desiredRunning ? "保持运行" : "按需启动" }}</strong>
@@ -392,7 +405,35 @@ onUnmounted(() => {
         </div>
       </article>
 
-      <article class="panel panel-span-5">
+      <article class="panel panel-span-4">
+        <div class="panel__header">
+          <div>
+            <p class="panel__eyebrow">Overview</p>
+            <h2>当前摘要</h2>
+          </div>
+        </div>
+
+        <div class="fact-stack">
+          <article class="fact-card">
+            <span class="summary-card__label">Agent 状态</span>
+            <strong>{{ runtimeState.label }}</strong>
+            <p>{{ agent?.statusSummary ?? "正在读取后台状态" }}</p>
+          </article>
+          <article class="fact-card">
+            <span class="summary-card__label">开机自启</span>
+            <strong>{{ agent?.autostartEnabled ? "已启用" : "未启用" }}</strong>
+            <p>登录当前用户后自动启动桌面管理器并驻留托盘。</p>
+          </article>
+          <article class="fact-mini-grid">
+            <div v-for="item in primaryFacts" :key="item.key" class="fact-mini">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </article>
+        </div>
+      </article>
+
+      <article class="panel panel-span-12">
         <div class="panel__header">
           <div>
             <p class="panel__eyebrow">Token</p>
