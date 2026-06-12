@@ -777,19 +777,6 @@ fn slash_join<const N: usize>(parts: [&str; N]) -> String {
     parts.join("/")
 }
 
-fn resolve_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = BTreeMap::<String, PathBuf>::new();
-    for path in paths {
-        let key = path.to_string_lossy().to_string();
-        seen.entry(key).or_insert(path);
-    }
-    seen.into_values().collect()
-}
-
 fn walk_files(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     if !root.exists() {

@@ -315,11 +315,7 @@ async fn ensure_agent_started(
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    apply_no_window(&mut command);
     let mut child =
         command.spawn().with_context(|| format!("failed to launch `{}`", binary.display()))?;
     let shared_state = app.state::<Arc<DesktopState>>().inner().clone();
@@ -432,11 +428,7 @@ where
     let binary = resolve_binary(binary_name);
     let mut command = Command::new(&binary);
     command.args(args);
-    #[cfg(target_os = "windows")]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    apply_no_window(&mut command);
     let output = command.output().await.with_context(|| {
             let attempted = candidates
                 .iter()
@@ -606,17 +598,23 @@ fn tauri_sidecar_target_triple() -> Option<&'static str> {
 }
 
 fn open_path_in_file_manager(path: &str) -> Result<()> {
-    let mut command = if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    let mut command = {
         let mut command = Command::new("explorer");
         command.arg(path);
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        apply_no_window(&mut command);
         command
-    } else if cfg!(target_os = "macos") {
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
         let mut command = Command::new("open");
         command.arg(path);
         command
-    } else {
+    };
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let mut command = {
         let mut command = Command::new("xdg-open");
         command.arg(path);
         command
@@ -624,6 +622,15 @@ fn open_path_in_file_manager(path: &str) -> Result<()> {
 
     command.spawn().map(|_| ()).map_err(|err| anyhow!("failed to open `{path}`: {err}"))
 }
+
+#[cfg(target_os = "windows")]
+fn apply_no_window(command: &mut Command) {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_no_window(_command: &mut Command) {}
 
 fn managed_logs_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
