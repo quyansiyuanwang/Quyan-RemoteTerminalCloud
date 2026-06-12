@@ -1,6 +1,7 @@
 mod shell;
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
@@ -21,6 +22,10 @@ use tracing::{info, warn};
 use url::Url;
 
 use crate::shell::{ShellSessionManager, browse_directories};
+
+const WEBSOCKET_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(20);
+const WEBSOCKET_PONG_TIMEOUT: Duration = Duration::from_secs(25);
+const WEBSOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RegisteredAgentSession {
@@ -210,21 +215,52 @@ where
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<String>();
     let shell_manager = ShellSessionManager::new(default_shell_type, outbound_tx.clone());
     let preferences_store = PreferencesStore::new(preferences_file_path);
+    let mut keepalive = tokio::time::interval(WEBSOCKET_KEEPALIVE_INTERVAL);
+    let mut watchdog = tokio::time::interval(Duration::from_secs(5));
+    let mut last_activity_at = Instant::now();
+    let mut pending_ping_at: Option<Instant> = None;
 
     let result: Result<()> = async {
         loop {
             tokio::select! {
+                _ = keepalive.tick() => {
+                    write_half
+                        .send(Message::Ping(Vec::new().into()))
+                        .await
+                        .context("send websocket ping")?;
+                    pending_ping_at = Some(Instant::now());
+                }
+                _ = watchdog.tick() => {
+                    let now = Instant::now();
+                    if now.duration_since(last_activity_at) > WEBSOCKET_IDLE_TIMEOUT {
+                        bail!(
+                            "websocket idle timeout after {} seconds without any activity",
+                            WEBSOCKET_IDLE_TIMEOUT.as_secs()
+                        );
+                    }
+                    if let Some(sent_at) = pending_ping_at
+                        && now.duration_since(sent_at) > WEBSOCKET_PONG_TIMEOUT
+                    {
+                        bail!(
+                            "websocket pong timeout after {} seconds",
+                            WEBSOCKET_PONG_TIMEOUT.as_secs()
+                        );
+                    }
+                }
                 outbound = outbound_rx.recv() => {
                     let Some(payload) = outbound else {
                         bail!("websocket outbound channel closed");
                     };
                     write_half.send(Message::Text(payload.into())).await.context("send websocket message")?;
+                    last_activity_at = Instant::now();
                 }
                 incoming = read_half.next() => {
                     let Some(frame) = incoming else {
                         bail!("websocket stream ended without a close frame");
                     };
                     let frame = frame.context("receive websocket message")?;
+                    last_activity_at = Instant::now();
+                    pending_ping_at = None;
                     match frame {
                         Message::Text(text) => {
                             handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;

@@ -867,6 +867,15 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         match tasks.join_next().await {
             Some(Ok((signal, Ok(())))) => {
                 tasks.abort_all();
+                push_log_entry_and_emit(
+                    app,
+                    state.as_ref(),
+                    "stderr",
+                    format!(
+                        "[remote-terminal-cloud-agent] {} exited unexpectedly; restarting agent connection.",
+                        task_signal_label(signal)
+                    ),
+                );
                 update_runtime_snapshot(&state, |runtime| {
                     runtime.connected = false;
                     runtime.websocket_url = None;
@@ -883,6 +892,15 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
             }
             Some(Ok((_, Err(err)))) => {
                 tasks.abort_all();
+                push_log_entry_and_emit(
+                    app,
+                    state.as_ref(),
+                    "stderr",
+                    format!(
+                        "[remote-terminal-cloud-agent] connection anomaly detected; restarting agent connection: {}",
+                        user_facing_error(&err)
+                    ),
+                );
                 update_runtime_snapshot(&state, |runtime| {
                     runtime.connected = false;
                     runtime.websocket_url = None;
