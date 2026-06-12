@@ -5,7 +5,7 @@ use std::fs;
 use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -47,6 +47,7 @@ const DESKTOP_STATE_FILE_NAME: &str = "desktop-state.json";
 const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
 const RUNTIME_RETRY_INTERVAL: Duration = Duration::from_secs(10);
 const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(90);
+const HEARTBEAT_STALE_TIMEOUT: Duration = Duration::from_secs(75);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -71,6 +72,13 @@ struct DesktopRuntimeSnapshot {
     last_heartbeat_at: Option<String>,
     last_error: Option<String>,
     retry_attempt: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TaskSignal {
+    Heartbeat,
+    Tunnel,
+    Watchdog,
 }
 
 impl Default for DesktopRuntimeSnapshot {
@@ -727,7 +735,7 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         return Ok(());
     }
 
-    let mut tasks = tokio::task::JoinSet::<(&'static str, Result<()>)>::new();
+    let mut tasks = tokio::task::JoinSet::<(TaskSignal, Result<()>)>::new();
 
     if config.run_heartbeat {
         let api_client = api_client.clone();
@@ -776,7 +784,7 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
                 Ok(())
             }
             .await;
-            ("heartbeat", result)
+            (TaskSignal::Heartbeat, result)
         });
     };
 
@@ -810,13 +818,54 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
                 },
             )
             .await;
-            ("tunnel", result)
+            (TaskSignal::Tunnel, result)
+        });
+    }
+
+    if config.run_heartbeat {
+        let app_handle = app.clone();
+        let state_ref = Arc::clone(&state);
+        tasks.spawn(async move {
+            let result: Result<()> = async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    let snapshot = current_runtime_snapshot(&state_ref);
+                    if !snapshot.connected {
+                        continue;
+                    }
+                    let Some(last_heartbeat_at) = snapshot.last_heartbeat_at.as_deref() else {
+                        continue;
+                    };
+                    let Some(age) = seconds_since_epoch_string(last_heartbeat_at) else {
+                        continue;
+                    };
+                    if age > HEARTBEAT_STALE_TIMEOUT.as_secs() {
+                        push_log_entry_and_emit(
+                            &app_handle,
+                            state_ref.as_ref(),
+                            "stderr",
+                            format!(
+                                "[remote-terminal-cloud-agent] heartbeat watchdog detected stale connection: last heartbeat was {}s ago.",
+                                age
+                            ),
+                        );
+                        bail!(
+                            "heartbeat watchdog detected stale connection after {} seconds",
+                            age
+                        );
+                    }
+                }
+                #[allow(unreachable_code)]
+                Ok(())
+            }
+            .await;
+            (TaskSignal::Watchdog, result)
         });
     }
 
     if config.run_tunnel {
         match tasks.join_next().await {
-            Some(Ok((source, Ok(())))) => {
+            Some(Ok((signal, Ok(())))) => {
                 tasks.abort_all();
                 update_runtime_snapshot(&state, |runtime| {
                     runtime.connected = false;
@@ -825,12 +874,12 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
                     runtime.last_error = Some(
                         format!(
                             "{} disconnected. Reconnecting to the backend.",
-                            if source == "tunnel" { "WebSocket tunnel" } else { "Heartbeat loop" }
+                            task_signal_label(signal)
                         ),
                     );
                 });
                 emit_agent_state(app, &state).await;
-                bail!("{source} disconnected")
+                bail!("{} disconnected", task_signal_label(signal))
             }
             Some(Ok((_, Err(err)))) => {
                 tasks.abort_all();
@@ -904,6 +953,22 @@ where
     }
 }
 
+fn current_runtime_snapshot(state: &DesktopState) -> DesktopRuntimeSnapshot {
+    state
+        .agent
+        .lock()
+        .map(|agent| agent.runtime.clone())
+        .unwrap_or_default()
+}
+
+fn task_signal_label(signal: TaskSignal) -> &'static str {
+    match signal {
+        TaskSignal::Heartbeat => "Heartbeat loop",
+        TaskSignal::Tunnel => "WebSocket tunnel",
+        TaskSignal::Watchdog => "Heartbeat watchdog",
+    }
+}
+
 fn compute_retry_delay(retry_attempt: u32) -> Duration {
     let capped_attempt = retry_attempt.min(6);
     let scale = 1_u64 << capped_attempt;
@@ -962,13 +1027,20 @@ fn runtime_status_summary(
 }
 
 fn format_rfc3339_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_secs();
     format!("{now}")
+}
+
+fn seconds_since_epoch_string(value: &str) -> Option<u64> {
+    let then = value.trim().parse::<u64>().ok()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs();
+    Some(now.saturating_sub(then))
 }
 
 #[cfg(target_os = "windows")]

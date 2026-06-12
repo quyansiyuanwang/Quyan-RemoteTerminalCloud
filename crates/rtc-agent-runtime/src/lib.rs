@@ -211,40 +211,54 @@ where
     let shell_manager = ShellSessionManager::new(default_shell_type, outbound_tx.clone());
     let preferences_store = PreferencesStore::new(preferences_file_path);
 
-    loop {
-        tokio::select! {
-            outbound = outbound_rx.recv() => {
-                let Some(payload) = outbound else {
-                    break;
-                };
-                write_half.send(Message::Text(payload.into())).await.context("send websocket message")?;
-            }
-            incoming = read_half.next() => {
-                let Some(frame) = incoming else {
-                    break;
-                };
-                let frame = frame.context("receive websocket message")?;
-                match frame {
-                    Message::Text(text) => {
-                        handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;
+    let result: Result<()> = async {
+        loop {
+            tokio::select! {
+                outbound = outbound_rx.recv() => {
+                    let Some(payload) = outbound else {
+                        bail!("websocket outbound channel closed");
+                    };
+                    write_half.send(Message::Text(payload.into())).await.context("send websocket message")?;
+                }
+                incoming = read_half.next() => {
+                    let Some(frame) = incoming else {
+                        bail!("websocket stream ended without a close frame");
+                    };
+                    let frame = frame.context("receive websocket message")?;
+                    match frame {
+                        Message::Text(text) => {
+                            handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;
+                        }
+                        Message::Binary(data) => {
+                            let text = String::from_utf8_lossy(&data).to_string();
+                            handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;
+                        }
+                        Message::Close(Some(frame)) => {
+                            bail!(
+                                "websocket closed by server (code {}, reason `{}`)",
+                                frame.code,
+                                frame.reason
+                            );
+                        }
+                        Message::Close(None) => {
+                            bail!("websocket closed by server");
+                        }
+                        Message::Ping(payload) => {
+                            write_half.send(Message::Pong(payload)).await.context("respond to ping")?;
+                        }
+                        Message::Pong(_) => {}
+                        Message::Frame(_) => {}
                     }
-                    Message::Binary(data) => {
-                        let text = String::from_utf8_lossy(&data).to_string();
-                        handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;
-                    }
-                    Message::Close(_) => break,
-                    Message::Ping(payload) => {
-                        write_half.send(Message::Pong(payload)).await.context("respond to ping")?;
-                    }
-                    Message::Pong(_) => {}
-                    Message::Frame(_) => {}
                 }
             }
         }
+        #[allow(unreachable_code)]
+        Ok(())
     }
+    .await;
 
     shell_manager.stop_all();
-    Ok(())
+    result
 }
 
 pub fn build_websocket_url(

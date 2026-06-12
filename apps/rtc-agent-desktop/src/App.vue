@@ -22,6 +22,7 @@ type StatusPayload = {
 type AgentOverview = {
   desiredRunning: boolean;
   running: boolean;
+  connected: boolean;
   pid?: number | null;
   autostartEnabled: boolean;
   hasToken: boolean;
@@ -78,13 +79,98 @@ const logsText = computed(() =>
 );
 
 const hasToken = computed(() => agent.value?.hasToken ?? false);
+const runtimeState = computed(() => {
+  const current = agent.value;
+  if (!current) {
+    return {
+      label: "读取中",
+      tone: "neutral",
+      detail: "正在同步后台状态。",
+    };
+  }
+
+  const summary = current.statusSummary ?? "";
+  if (current.connected) {
+    return {
+      label: "在线",
+      tone: "success",
+      detail: "注册、心跳和隧道连接均已建立。",
+    };
+  }
+  if (summary.includes("重连") || summary.includes("中断")) {
+    return {
+      label: "重连中",
+      tone: "warning",
+      detail: "连接已中断，桌面端正在自动恢复。",
+    };
+  }
+  if (summary.includes("等待配置") || !current.hasToken) {
+    return {
+      label: "待配置",
+      tone: "danger",
+      detail: "需要先保存 Token，后台 Agent 才能建立连接。",
+    };
+  }
+  if (summary.includes("正在注册") || summary.includes("建立隧道")) {
+    return {
+      label: "注册中",
+      tone: "primary",
+      detail: "正在向后端注册并建立会话通道。",
+    };
+  }
+  if (current.running) {
+    return {
+      label: "运行中",
+      tone: "primary",
+      detail: "Agent 进程已启动，等待最新连接反馈。",
+    };
+  }
+  return {
+    label: "未启动",
+    tone: "neutral",
+    detail: "后台 Agent 当前未运行。",
+  };
+});
+
+const healthItems = computed(() => {
+  const current = agent.value;
+  return [
+    {
+      key: "runtime",
+      label: "运行态",
+      value: current?.running ? "已启动" : "未启动",
+      tone: current?.running ? "success" : "neutral",
+    },
+    {
+      key: "connectivity",
+      label: "连接态",
+      value: runtimeState.value.label,
+      tone: runtimeState.value.tone,
+    },
+    {
+      key: "token",
+      label: "Token",
+      value: current?.hasToken ? "已配置" : "缺失",
+      tone: current?.hasToken ? "success" : "danger",
+    },
+    {
+      key: "autostart",
+      label: "自启动",
+      value: current?.autostartEnabled ? "已启用" : "未启用",
+      tone: current?.autostartEnabled ? "primary" : "neutral",
+    },
+  ];
+});
+
 const agentBadge = computed(() => {
+  if (agent.value?.connected) return "Online";
   if (agent.value?.running) return "Running";
   if (agent.value?.hasToken) return "Ready";
   return "Needs Token";
 });
 const agentBadgeClass = computed(() => {
-  if (agent.value?.running) return "is-success";
+  if (agent.value?.connected) return "is-success";
+  if (agent.value?.running) return "is-primary";
   if (agent.value?.hasToken) return "is-warning";
   return "is-danger";
 });
@@ -212,10 +298,29 @@ onUnmounted(() => {
       <div v-if="feedback" class="alert alert-success">{{ feedback }}</div>
     </section>
 
+    <section class="status-ribbon">
+      <article class="status-ribbon__hero" :class="`is-${runtimeState.tone}`">
+        <div>
+          <span class="status-ribbon__label">当前连接状态</span>
+          <strong>{{ runtimeState.label }}</strong>
+        </div>
+        <p>{{ runtimeState.detail }}</p>
+      </article>
+      <article
+        v-for="item in healthItems"
+        :key="item.key"
+        class="status-ribbon__item"
+        :class="`is-${item.tone}`"
+      >
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+      </article>
+    </section>
+
     <section class="summary-grid">
       <article class="summary-card">
         <span class="summary-card__label">Agent 状态</span>
-        <strong>{{ agent?.running ? "运行中" : "未运行" }}</strong>
+        <strong>{{ runtimeState.label }}</strong>
         <p>{{ agent?.statusSummary ?? "正在读取后台状态" }}</p>
       </article>
       <article class="summary-card">
@@ -279,6 +384,10 @@ onUnmounted(() => {
           <div class="inline-kpi">
             <span>连接准备度</span>
             <strong>{{ hasToken ? "已就绪" : "待配置" }}</strong>
+          </div>
+          <div class="inline-kpi">
+            <span>实际连接态</span>
+            <strong>{{ agent?.connected ? "已在线" : runtimeState.label }}</strong>
           </div>
         </div>
       </article>
