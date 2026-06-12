@@ -3313,7 +3313,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -3325,7 +3325,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "rtc-agent-config",
@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-installer"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-packaging"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -3370,7 +3370,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "hostname",
@@ -3382,7 +3382,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-preferences"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "rtc-agent-protocol",
@@ -3392,14 +3392,14 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "rtc-agent-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -3420,7 +3420,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agent-service"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -3428,7 +3428,7 @@ dependencies = [
 
 [[package]]
 name = "rtc-agentd"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -6006,7 +6006,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",

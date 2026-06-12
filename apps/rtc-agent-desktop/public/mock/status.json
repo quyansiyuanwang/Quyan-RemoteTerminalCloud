@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "serverBaseUrl": "https://api.qysyw.cn",
   "registrationToken": "configured",
   "registrationTokenSource": "config file",
@@ -15,4 +15,3 @@
   "configFile": "C:\\Users\\user\\AppData\\Roaming\\remote-terminal-cloud-agent\\config.json",
   "preferencesFile": "C:\\Users\\user\\AppData\\Roaming\\remote-terminal-cloud-agent\\preferences.json"
 }
-

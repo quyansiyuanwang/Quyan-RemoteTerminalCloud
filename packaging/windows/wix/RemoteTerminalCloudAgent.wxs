@@ -4,7 +4,7 @@
   <Package
     Name="Remote Terminal Cloud Agent"
     Manufacturer="Remote Terminal Cloud"
-    Version="0.2.0"
+    Version="0.3.0"
     UpgradeCode="A7A32B15-4E12-4DAB-8B9A-3C91F275AE60"
     InstallerVersion="500"
     Scope="perMachine"
