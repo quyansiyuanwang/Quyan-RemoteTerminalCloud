@@ -103,6 +103,21 @@ cargo xtask artifact
 cargo xtask package
 ```
 
+版本切换也可以直接走统一命令：
+
+```bash
+cargo run -p xtask -- version 0.3.1
+```
+
+这会自动同步：
+
+- 根目录 `VERSION`
+- Rust workspace 版本
+- Tauri 桌面端版本
+- 前端 `package.json` / `package-lock.json`
+- Windows NSIS / WiX 版本元数据
+- 测试与 mock 中的产品版本号
+
 可通过环境变量指定目标平台：
 
 ```bash
