@@ -303,178 +303,205 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="console-shell">
+  <div class="shell">
+
+    <!-- ── Topbar ── -->
     <header class="topbar">
-      <div class="topbar__brand">
-        <div class="brand-mark">RTC</div>
+      <div class="brand">
+        <div class="brand-icon">RTC</div>
         <div>
-          <p class="brand-label">Remote Terminal Cloud Agent</p>
-          <h1>桌面管理控制台</h1>
+          <div class="brand-name">Remote Terminal Cloud</div>
+          <div class="brand-sub">Agent Desktop</div>
         </div>
       </div>
-      <div class="topbar__actions">
-        <span class="status-pill" :class="agentBadgeClass">{{ agentBadge }}</span>
-        <span class="sync-hint">本地每 {{ REFRESH_INTERVAL_MS / 1000 }} 秒自动刷新</span>
-        <button class="button button-secondary" @click="refresh" :disabled="loading">
-          {{ loading ? "刷新中..." : "刷新状态" }}
-        </button>
+
+      <nav class="topbar-metrics">
+        <div class="tm-item">
+          <span class="tm-label">状态</span>
+          <span class="tm-value" :class="{ 'c-green': runtimeState.tone==='success', 'c-red': runtimeState.tone==='danger', 'c-yellow': runtimeState.tone==='warning', 'c-blue': runtimeState.tone==='primary', 'c-dim': runtimeState.tone==='neutral' }">
+            {{ runtimeState.label }}
+          </span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">PID</span>
+          <span class="tm-value" :class="agent?.pid ? 'c-green' : 'c-dim'">{{ agent?.pid ?? '--' }}</span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">平台</span>
+          <span class="tm-value">{{ status?.platform ?? '--' }} / {{ status?.arch ?? '--' }}</span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">Shell</span>
+          <span class="tm-value">{{ status?.effectiveDefaultShell ?? '--' }}</span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">Token</span>
+          <span class="tm-value" :class="hasToken ? 'c-green' : 'c-red'">{{ hasToken ? '已配置' : '缺失' }}</span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">自启动</span>
+          <span class="tm-value" :class="agent?.autostartEnabled ? 'c-blue' : 'c-dim'">{{ agent?.autostartEnabled ? 'ON' : 'OFF' }}</span>
+        </div>
+        <div class="tm-item">
+          <span class="tm-label">版本</span>
+          <span class="tm-value">{{ status?.version ?? '--' }}</span>
+        </div>
+      </nav>
+
+      <div class="topbar-right">
+        <span class="sync-hint">↻ {{ REFRESH_INTERVAL_MS / 1000 }}s</span>
+        <span class="dot-badge" :class="agentBadgeClass">{{ agentBadge }}</span>
+        <button class="btn btn-ghost" @click="refresh" :disabled="loading">{{ loading ? '...' : '刷新' }}</button>
       </div>
     </header>
 
-    <section class="notice-strip" v-if="onboardingRequired || error || feedback">
-      <div v-if="onboardingRequired" class="alert alert-warning">
-        首次启动引导：请先填写 Token，保存后桌面端会自动接管后台运行。
-      </div>
-      <div v-if="error" class="alert alert-danger">{{ error }}</div>
-      <div v-if="feedback" class="alert alert-success">{{ feedback }}</div>
-    </section>
+    <!-- ── Notices ── -->
+    <div class="notice-strip" v-if="onboardingRequired || error || feedback">
+      <div v-if="onboardingRequired" class="alert alert-w">⚠ 首次启动：请填写 Token 后保存，桌面端将自动接管后台运行。</div>
+      <div v-if="error"    class="alert alert-e">✕ {{ error }}</div>
+      <div v-if="feedback" class="alert alert-s">✓ {{ feedback }}</div>
+    </div>
 
-    <section class="status-ribbon">
-      <article class="status-ribbon__hero" :class="`is-${runtimeState.tone}`">
-        <div>
-          <span class="status-ribbon__label">当前连接状态</span>
-          <strong>{{ runtimeState.label }}</strong>
-        </div>
-        <p>{{ runtimeState.detail }}</p>
-      </article>
-      <article
-        v-for="item in healthItems"
-        :key="item.key"
-        class="status-ribbon__item"
-        :class="`is-${item.tone}`"
-      >
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-    </section>
+    <!-- ── Main ── -->
+    <div class="main-grid">
 
-    <section class="workspace-grid">
-      <article class="panel panel-span-8">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Agent Control</p>
-            <h2>后台运行控制</h2>
-          </div>
-          <span class="panel__hint">推荐把桌面端作为唯一入口使用</span>
-        </div>
+      <!-- Left column -->
+      <div class="col-main">
 
-        <div class="toolbar">
-          <button
-            class="button button-primary"
-            @click="runDesktopAction('start')"
-            :disabled="!!activeDesktopAction"
-          >
-            {{ activeDesktopAction === "start" ? "启动中..." : "启动后台 Agent" }}
-          </button>
-          <button
-            class="button button-secondary"
-            @click="runDesktopAction('stop')"
-            :disabled="!!activeDesktopAction"
-          >
-            {{ activeDesktopAction === "stop" ? "停止中..." : "停止后台 Agent" }}
-          </button>
-          <button
-            class="button button-secondary"
-            @click="runDesktopAction('restart')"
-            :disabled="!!activeDesktopAction"
-          >
-            {{ activeDesktopAction === "restart" ? "重启中..." : "重启后台 Agent" }}
-          </button>
-          <button class="button button-secondary" @click="toggleAutostart" :disabled="autostartBusy">
-            {{ autostartBusy ? "处理中..." : agent?.autostartEnabled ? "关闭开机自启" : "启用开机自启" }}
-          </button>
-        </div>
-
-        <div class="inline-kpis inline-kpis--four">
-          <div class="inline-kpi">
-            <span>期望状态</span>
-            <strong>{{ agent?.desiredRunning ? "保持运行" : "按需启动" }}</strong>
+        <!-- Agent health KPIs -->
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-title">Agent Health</span>
+            <span class="sec-hint">{{ agent?.statusSummary ?? '正在同步...' }}</span>
           </div>
-          <div class="inline-kpi">
-            <span>当前进程 PID</span>
-            <strong>{{ agent?.pid ?? "--" }}</strong>
-          </div>
-          <div class="inline-kpi">
-            <span>连接准备度</span>
-            <strong>{{ hasToken ? "已就绪" : "待配置" }}</strong>
-          </div>
-          <div class="inline-kpi">
-            <span>实际连接态</span>
-            <strong>{{ agent?.connected ? "已在线" : runtimeState.label }}</strong>
-          </div>
-        </div>
-      </article>
-
-      <article class="panel panel-span-4">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Overview</p>
-            <h2>当前摘要</h2>
-          </div>
-        </div>
-
-        <div class="fact-stack">
-          <article class="fact-card">
-            <span class="summary-card__label">Agent 状态</span>
-            <strong>{{ runtimeState.label }}</strong>
-            <p>{{ agent?.statusSummary ?? "正在读取后台状态" }}</p>
-          </article>
-          <article class="fact-card">
-            <span class="summary-card__label">开机自启</span>
-            <strong>{{ agent?.autostartEnabled ? "已启用" : "未启用" }}</strong>
-            <p>登录当前用户后自动启动桌面管理器并驻留托盘。</p>
-          </article>
-          <article class="fact-mini-grid">
-            <div v-for="item in primaryFacts" :key="item.key" class="fact-mini">
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
+          <div class="kpi-row">
+            <div v-for="item in healthItems" :key="item.key" class="kpi-cell">
+              <div class="kpi-label">{{ item.label }}</div>
+              <div class="kpi-val"
+                :class="{ 'c-green': item.tone==='success', 'c-blue': item.tone==='primary', 'c-red': item.tone==='danger', 'c-dim': item.tone==='neutral' }">
+                {{ item.value }}
+              </div>
             </div>
-          </article>
-        </div>
-      </article>
-
-      <article class="panel panel-span-12">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Token</p>
-            <h2>接入配置</h2>
           </div>
         </div>
 
-        <p class="panel__desc">
-          保存后会写入兼容配置文件，并立即尝试由桌面端接管后台运行。
-        </p>
-
-        <label class="field-label">Registration Token</label>
-        <input
-          v-model="token"
-          class="field-input"
-          type="password"
-          autocomplete="off"
-          placeholder="请输入 registration token"
-        />
-        <button class="button button-primary button-block" @click="saveToken" :disabled="tokenSaving">
-          {{ tokenSaving ? "保存中..." : "保存并接管运行" }}
-        </button>
-      </article>
-
-      <article class="panel panel-span-12">
-        <div class="panel__header">
-          <div>
-            <p class="panel__eyebrow">Runtime Console</p>
-            <h2>Agent 状态与日志终端</h2>
+        <!-- Agent control -->
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-title">Agent Control</span>
+            <span class="sec-hint">推荐把桌面端作为唯一操作入口</span>
           </div>
-          <span class="panel__hint">直接显示后台 Agent 原始输出</span>
+          <div class="toolbar">
+            <button class="btn btn-primary"       @click="runDesktopAction('start')"   :disabled="!!activeDesktopAction">{{ activeDesktopAction==='start'   ? '启动中…' : '▶ 启动' }}</button>
+            <button class="btn btn-ghost"         @click="runDesktopAction('stop')"    :disabled="!!activeDesktopAction">{{ activeDesktopAction==='stop'    ? '停止中…' : '■ 停止' }}</button>
+            <button class="btn btn-ghost"         @click="runDesktopAction('restart')" :disabled="!!activeDesktopAction">{{ activeDesktopAction==='restart' ? '重启中…' : '↺ 重启' }}</button>
+            <button class="btn btn-danger-ghost"  @click="toggleAutostart"             :disabled="autostartBusy">
+              {{ autostartBusy ? '处理中…' : agent?.autostartEnabled ? '⊘ 关闭自启' : '⊕ 开机自启' }}
+            </button>
+          </div>
+          <div class="kpi-row" style="margin-top:10px">
+            <div class="kpi-cell">
+              <div class="kpi-label">期望状态</div>
+              <div class="kpi-val" :class="agent?.desiredRunning ? 'c-green' : 'c-dim'">{{ agent?.desiredRunning ? 'KEEP_RUNNING' : 'ON_DEMAND' }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">进程 PID</div>
+              <div class="kpi-val" :class="agent?.pid ? 'c-blue' : 'c-dim'">{{ agent?.pid ?? '--' }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">准备度</div>
+              <div class="kpi-val" :class="hasToken ? 'c-green' : 'c-red'">{{ hasToken ? 'READY' : 'NEEDS_TOKEN' }}</div>
+            </div>
+            <div class="kpi-cell">
+              <div class="kpi-label">连接态</div>
+              <div class="kpi-val"
+                :class="{ 'c-green': agent?.connected, 'c-blue': !agent?.connected && agent?.running, 'c-dim': !agent?.running }">
+                {{ agent?.connected ? 'ONLINE' : runtimeState.label.toUpperCase() }}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <textarea
-          class="terminal-textarea"
-          :value="logsText || '暂无日志输出。启动后台 Agent 或刷新状态后，这里会显示注册、心跳和错误信息。'"
-          readonly
-          spellcheck="false"
-        />
-      </article>
+        <!-- Token config -->
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-title">Token 接入配置</span>
+            <span class="sec-hint">保存后桌面端立即接管</span>
+          </div>
+          <label class="field-label">Registration Token</label>
+          <input v-model="token" class="field-input" type="password" autocomplete="off" placeholder="rlt_xxxxxxxxxxxxxxxxxxxxxxxx" />
+          <button class="btn btn-primary btn-block" @click="saveToken" :disabled="tokenSaving">
+            {{ tokenSaving ? '保存中…' : '保存并接管运行' }}
+          </button>
+        </div>
 
-    </section>
-  </main>
+        <!-- Log terminal -->
+        <div class="sec" style="flex:1;display:flex;flex-direction:column;">
+          <div class="sec-head">
+            <span class="sec-title">Runtime Console</span>
+            <span class="sec-hint">后台 Agent 原始输出</span>
+          </div>
+          <textarea class="terminal" style="flex:1;min-height:180px"
+            :value="logsText || '// 暂无日志。启动 Agent 后此处将显示注册、心跳及错误信息。'"
+            readonly spellcheck="false" />
+        </div>
+
+      </div>
+
+      <!-- Right sidebar -->
+      <div class="col-side">
+
+        <!-- Connection state -->
+        <div class="sec">
+          <div class="sec-head"><span class="sec-title">Connection State</span></div>
+          <div class="status-block"
+            :style="{ borderColor: runtimeState.tone==='success' ? 'rgba(14,203,129,.35)' : runtimeState.tone==='danger' ? 'rgba(246,70,93,.35)' : runtimeState.tone==='warning' ? 'rgba(240,185,11,.35)' : 'var(--border-hi)' }">
+            <div class="status-block-title">当前连接状态</div>
+            <div class="status-block-val"
+              :class="{ 'c-green': runtimeState.tone==='success', 'c-red': runtimeState.tone==='danger', 'c-yellow': runtimeState.tone==='warning', 'c-blue': runtimeState.tone==='primary' }"
+              style="font-size:22px">
+              {{ runtimeState.label }}
+            </div>
+            <div class="status-block-desc">{{ runtimeState.detail }}</div>
+          </div>
+          <div class="health-grid" style="margin-top:8px">
+            <div v-for="item in healthItems" :key="item.key" class="health-cell">
+              <div class="health-label">{{ item.label }}</div>
+              <div class="health-val"
+                :class="{ g: item.tone==='success', b: item.tone==='primary', y: item.tone==='warning', r: item.tone==='danger', n: item.tone==='neutral' }">
+                {{ item.value }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Environment facts -->
+        <div class="sec">
+          <div class="sec-head"><span class="sec-title">Environment</span></div>
+          <table class="fact-table">
+            <tr><td>版本</td><td>{{ status?.version ?? '--' }}</td></tr>
+            <tr><td>平台</td><td>{{ status?.platform ?? '--' }}</td></tr>
+            <tr><td>架构</td><td>{{ status?.arch ?? '--' }}</td></tr>
+            <tr><td>Shell</td><td>{{ status?.effectiveDefaultShell ?? '--' }}</td></tr>
+            <tr><td>Token 来源</td><td>{{ agent?.tokenSource ?? '--' }}</td></tr>
+            <tr><td>SSH</td><td :style="{ color: status?.sshAvailable ? 'var(--green)' : 'var(--text-mute)' }">{{ status?.sshAvailable ? '可用' : '不可用' }}</td></tr>
+            <tr v-if="status?.serverBaseUrl"><td>服务端</td><td style="word-break:break-all;font-size:10px">{{ status.serverBaseUrl }}</td></tr>
+          </table>
+        </div>
+
+        <!-- Available shells -->
+        <div class="sec" v-if="status?.availableShells?.length">
+          <div class="sec-head"><span class="sec-title">Available Shells</span></div>
+          <table class="fact-table">
+            <tr v-for="(sh, i) in status.availableShells" :key="i">
+              <td>{{ sh === status.effectiveDefaultShell ? '★' : '' }}</td>
+              <td>{{ sh }}</td>
+            </tr>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
 </template>
