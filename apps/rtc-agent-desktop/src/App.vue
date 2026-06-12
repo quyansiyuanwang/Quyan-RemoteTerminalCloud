@@ -73,6 +73,9 @@ const error = ref("");
 const feedback = ref("");
 const onboardingRequired = ref(false);
 const logs = ref<AgentLogEntry[]>([]);
+const logsText = computed(() =>
+  logs.value.map((entry) => `[${entry.stream}] ${entry.line}`).join("\n"),
+);
 
 const hasToken = computed(() => agent.value?.hasToken ?? false);
 const agentBadge = computed(() => {
@@ -311,20 +314,15 @@ onUnmounted(() => {
             <p class="panel__eyebrow">Runtime Console</p>
             <h2>Agent 状态与日志终端</h2>
           </div>
-          <span class="panel__hint">这里会直接显示后台 Agent 的运行输出</span>
+          <span class="panel__hint">直接显示后台 Agent 原始输出</span>
         </div>
 
-        <div class="terminal">
-          <div v-if="!logs.length" class="terminal__empty">
-            暂无日志输出。启动后台 Agent 或刷新状态后，这里会显示注册、心跳和错误信息。
-          </div>
-          <div v-for="(entry, index) in logs" :key="`${entry.stream}-${index}-${entry.line}`" class="terminal__line">
-            <span class="terminal__stream" :class="entry.stream === 'stderr' ? 'is-stderr' : 'is-stdout'">
-              {{ entry.stream }}
-            </span>
-            <code>{{ entry.line }}</code>
-          </div>
-        </div>
+        <textarea
+          class="terminal-textarea"
+          :value="logsText || '暂无日志输出。启动后台 Agent 或刷新状态后，这里会显示注册、心跳和错误信息。'"
+          readonly
+          spellcheck="false"
+        />
       </article>
 
     </section>
