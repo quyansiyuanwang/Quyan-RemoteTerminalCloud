@@ -181,9 +181,30 @@ pub async fn run_agent_tunnel(
     default_shell_type: ShellType,
     preferences_file_path: &Path,
 ) -> Result<()> {
+    run_agent_tunnel_with_connect_hook(
+        server_base_url,
+        session,
+        default_shell_type,
+        preferences_file_path,
+        |_| {},
+    )
+    .await
+}
+
+pub async fn run_agent_tunnel_with_connect_hook<F>(
+    server_base_url: &str,
+    session: RegisteredAgentSession,
+    default_shell_type: ShellType,
+    preferences_file_path: &Path,
+    on_connected: F,
+) -> Result<()>
+where
+    F: FnOnce(&str),
+{
     let (websocket, websocket_url) = connect_agent_websocket(server_base_url, &session).await?;
     info!("tunnel connected for {}", session.device_id);
     info!("websocket endpoint: {}", websocket_url);
+    on_connected(&websocket_url);
 
     let (mut write_half, mut read_half) = websocket.split();
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<String>();

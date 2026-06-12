@@ -3329,6 +3329,10 @@ version = "0.3.1"
 dependencies = [
  "anyhow",
  "rtc-agent-config",
+ "rtc-agent-platform",
+ "rtc-agent-preferences",
+ "rtc-agent-protocol",
+ "rtc-agent-runtime",
  "rtc-agent-service",
  "serde",
  "serde_json",
@@ -3337,6 +3341,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tokio",
+ "tracing-subscriber",
  "winreg 0.55.0",
 ]
 

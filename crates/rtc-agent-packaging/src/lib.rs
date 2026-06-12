@@ -293,18 +293,6 @@ fn windows_desktop_bundle_command(
     }
     fs::create_dir_all(&stage_dir).with_context(|| format!("create {}", stage_dir.display()))?;
 
-    let target_triple = target
-        .map(|value| value.to_owned())
-        .unwrap_or_else(|| rust_target_triple(ctx).unwrap_or_else(|_| "x86_64-pc-windows-msvc".to_owned()));
-    let sidecar_dir = stage_dir.join("deps");
-    fs::create_dir_all(&sidecar_dir).with_context(|| format!("create {}", sidecar_dir.display()))?;
-
-    build_cli_binary(
-        ctx,
-        "rtc-agentd",
-        &sidecar_dir.join(format!("rtc-agentd-{target_triple}.exe")),
-        false,
-    )?;
     build_desktop_binary(ctx, &stage_dir)?;
 
     let mut npm = Command::new(node_package_manager_command());
@@ -313,9 +301,6 @@ fn windows_desktop_bundle_command(
 
     let tauri_config_patch = serde_json::json!({
         "bundle": {
-            "externalBin": [
-                sidecar_dir.join("rtc-agentd").display().to_string()
-            ],
             "windows": {
                 "nsis": {
                     "template": desktop_dir
@@ -351,11 +336,6 @@ fn windows_desktop_bundle_command(
     if tauri_bundle_root.exists() {
         copy_tree(&tauri_bundle_root, &output_dir)?;
     }
-
-    validate_release_server_url(
-        &sidecar_dir.join(format!("rtc-agentd-{target_triple}.exe")),
-        "windows sidecar rtc-agentd",
-    )?;
 
     let mut details = BTreeMap::new();
     details.insert("outputDir".into(), output_dir.display().to_string());

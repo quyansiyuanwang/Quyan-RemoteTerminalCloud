@@ -1,28 +1,37 @@
-use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::env;
 use std::fs;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::Command as StdCommand;
+use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow, bail};
 use rtc_agent_config::{
-    default_config_file_path, normalize_template_string, persist_registration_token,
-    read_config_file,
+    RuntimeConfig, default_config_file_path, default_server_base_url,
+    has_registration_token_env_override, normalize_template_string, persist_registration_token,
+    read_config_file, read_runtime_config,
 };
+use rtc_agent_platform::{
+    collect_host_snapshot, resolve_default_shell,
+};
+use rtc_agent_preferences::PreferencesStore;
+use rtc_agent_protocol::ShellType;
+use rtc_agent_runtime::{ApiClient, describe_error, run_agent_tunnel_with_connect_hook};
 use rtc_agent_service as service;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
+use tauri::async_runtime::JoinHandle;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Listener, Manager, State, WindowEvent};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 #[cfg(target_os = "windows")]
 use winreg::enums::{HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const TRAY_ID: &str = "rtc-agent-tray";
 const MENU_OPEN: &str = "open-manager";
 const MENU_START_AGENT: &str = "start-agent";
@@ -35,6 +44,48 @@ const MENU_QUIT: &str = "quit";
 const MAIN_WINDOW_LABEL: &str = "main";
 const APP_RUN_REG_VALUE: &str = "RemoteTerminalCloudAgentDesktop";
 const DESKTOP_STATE_FILE_NAME: &str = "desktop-state.json";
+const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
+const RUNTIME_RETRY_INTERVAL: Duration = Duration::from_secs(10);
+const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(90);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum DesktopRuntimePhase {
+    Idle,
+    WaitingConfig,
+    Starting,
+    Registering,
+    Online,
+    Reconnecting,
+    Stopped,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopRuntimeSnapshot {
+    phase: DesktopRuntimePhase,
+    connected: bool,
+    registered_device_id: Option<String>,
+    websocket_url: Option<String>,
+    last_heartbeat_at: Option<String>,
+    last_error: Option<String>,
+    retry_attempt: u32,
+}
+
+impl Default for DesktopRuntimeSnapshot {
+    fn default() -> Self {
+        Self {
+            phase: DesktopRuntimePhase::Idle,
+            connected: false,
+            registered_device_id: None,
+            websocket_url: None,
+            last_heartbeat_at: None,
+            last_error: None,
+            retry_attempt: 0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +128,7 @@ struct SaveTokenResult {
 struct AgentOverview {
     desired_running: bool,
     running: bool,
+    connected: bool,
     pid: Option<u32>,
     autostart_enabled: bool,
     has_token: bool,
@@ -126,17 +178,24 @@ struct AutostartResult {
 
 #[derive(Debug)]
 struct AgentSupervisor {
-    child: Option<Child>,
+    task: Option<JoinHandle<()>>,
     desired_running: bool,
+    virtual_pid: Option<u32>,
+    runtime: DesktopRuntimeSnapshot,
 }
 
 impl AgentSupervisor {
     fn new() -> Self {
-        Self { child: None, desired_running: false }
+        Self {
+            task: None,
+            desired_running: false,
+            virtual_pid: Some(std::process::id()),
+            runtime: DesktopRuntimeSnapshot::default(),
+        }
     }
 
-    fn pid(&mut self) -> Option<u32> {
-        self.child.as_mut().and_then(|child| child.id())
+    fn pid(&self) -> Option<u32> {
+        self.virtual_pid
     }
 }
 
@@ -255,7 +314,7 @@ async fn set_autostart(
 
 async fn build_bootstrap_payload(state: &DesktopState) -> Result<BootstrapPayload> {
     reconcile_agent_state(state).await;
-    let status = run_agent_json::<StatusPayload>(&["status", "--json"]).await?;
+    let status = build_status_payload()?;
     let agent = build_agent_overview(state).await;
     Ok(BootstrapPayload {
         status,
@@ -304,28 +363,20 @@ async fn ensure_agent_started(
     }
 
     let mut agent = state.agent.lock().map_err(|_| anyhow!("agent state is unavailable"))?;
-    if agent.child.is_some() {
+    if agent.task.is_some() {
         agent.desired_running = true;
         return Ok(());
     }
+    agent.runtime.phase = DesktopRuntimePhase::Starting;
+    agent.runtime.last_error = None;
+    agent.runtime.retry_attempt = 0;
 
-    let binary = resolve_binary("rtc-agentd");
-    let mut command = Command::new(&binary);
-    command.arg("run");
-    command.stdin(Stdio::null());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    apply_no_window(&mut command);
-    let mut child =
-        command.spawn().with_context(|| format!("failed to launch `{}`", binary.display()))?;
-    let shared_state = app.state::<Arc<DesktopState>>().inner().clone();
-    if let Some(stdout) = child.stdout.take() {
-        spawn_log_reader(app.clone(), Arc::clone(&shared_state), "stdout", stdout);
-    }
-    if let Some(stderr) = child.stderr.take() {
-        spawn_log_reader(app.clone(), shared_state, "stderr", stderr);
-    }
-    agent.child = Some(child);
+    let runtime_state = app.state::<Arc<DesktopState>>().inner().clone();
+    let app_handle = app.clone();
+    let task = tauri::async_runtime::spawn(async move {
+        run_agent_supervisor(app_handle, runtime_state).await;
+    });
+    agent.task = Some(task);
     agent.desired_running = true;
     drop(agent);
 
@@ -337,15 +388,18 @@ async fn ensure_agent_started(
 }
 
 async fn stop_agent(state: &DesktopState) -> Result<()> {
-    let mut child_to_kill = {
+    let task_to_abort = {
         let mut agent = state.agent.lock().map_err(|_| anyhow!("agent state is unavailable"))?;
         agent.desired_running = false;
-        agent.child.take()
+        agent.runtime.phase = DesktopRuntimePhase::Stopped;
+        agent.runtime.connected = false;
+        agent.runtime.last_error = None;
+        agent.runtime.websocket_url = None;
+        agent.task.take()
     };
 
-    if let Some(mut child) = child_to_kill.take() {
-        let _ = child.kill().await;
-        let _ = child.wait().await;
+    if let Some(task) = task_to_abort {
+        task.abort();
     }
 
     Ok(())
@@ -357,53 +411,41 @@ async fn restart_agent(app: &AppHandle, state: &DesktopState, force_restart: boo
 }
 
 async fn reconcile_agent_state(state: &DesktopState) {
-    let mut stale_child = None;
     if let Ok(mut agent) = state.agent.lock() {
-        if let Some(child) = agent.child.as_mut() {
-            match child.try_wait() {
-                Ok(Some(_status)) => stale_child = agent.child.take(),
-                Ok(None) => {}
-                Err(_) => stale_child = agent.child.take(),
-            }
+        if agent.task.is_none() && agent.desired_running && matches!(agent.runtime.phase, DesktopRuntimePhase::Idle) {
+            agent.runtime.phase = DesktopRuntimePhase::Stopped;
         }
-    }
-
-    if let Some(mut child) = stale_child {
-        let _ = child.kill().await;
-        let _ = child.wait().await;
     }
 }
 
 async fn build_agent_overview(state: &DesktopState) -> AgentOverview {
-    let (desired_running, running, pid) = match state.agent.lock() {
+    let (desired_running, running, connected, pid, runtime) = match state.agent.lock() {
         Ok(mut agent) => {
-            let running = match agent.child.as_mut() {
-                Some(child) => child.try_wait().ok().flatten().is_none(),
-                None => false,
-            };
+            let running = agent.task.is_some();
             if !running {
-                agent.child = None;
+                agent.task = None;
             }
-            (agent.desired_running, running, agent.pid())
+            (
+                agent.desired_running,
+                running,
+                agent.runtime.connected,
+                agent.pid(),
+                agent.runtime.clone(),
+            )
         }
-        Err(_) => (false, false, None),
+        Err(_) => (false, false, false, None, DesktopRuntimeSnapshot::default()),
     };
 
     let (has_token, token_source) = token_state();
     AgentOverview {
         desired_running,
         running,
+        connected,
         pid,
         autostart_enabled: is_autostart_enabled(),
         has_token,
         token_source,
-        status_summary: if running {
-            "Agent process is running. Registration and heartbeat results are shown in the log panel.".into()
-        } else if has_token {
-            "Ready to start in tray background mode.".into()
-        } else {
-            "Token is required before the background agent can start.".into()
-        },
+        status_summary: runtime_status_summary(&runtime, running, has_token),
     }
 }
 
@@ -412,195 +454,10 @@ async fn emit_agent_state(app: &AppHandle, state: &DesktopState) {
     let _ = app.emit("desktop://agent-state", payload);
 }
 
-async fn run_agent_json<T>(args: &[&str]) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    run_json_command("rtc-agentd", args).await
-}
-
-async fn run_json_command<T>(binary_name: &str, args: &[&str]) -> Result<T>
-where
-    T: DeserializeOwned,
-{
-    let candidate_names = binary_candidate_names(binary_name);
-    let candidates = resolve_binary_candidates(&candidate_names);
-    let binary = resolve_binary(binary_name);
-    let mut command = Command::new(&binary);
-    command.args(args);
-    apply_no_window(&mut command);
-    let output = command.output().await.with_context(|| {
-            let attempted = candidates
-                .iter()
-                .take(8)
-                .map(|path| path.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("failed to spawn `{}`. attempted: {}", binary.display(), attempted)
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        bail!(
-            "`{}` failed with status {}. stdout: {} stderr: {}",
-            binary.display(),
-            output.status,
-            stdout,
-            stderr
-        );
-    }
-
-    serde_json::from_slice::<T>(&output.stdout).with_context(|| {
-        format!(
-            "failed to decode JSON from `{}`: {}",
-            binary.display(),
-            String::from_utf8_lossy(&output.stdout).trim()
-        )
-    })
-}
-
-fn resolve_binary(binary_name: &str) -> PathBuf {
-    let env_name = format!("{}_BIN", binary_name.replace('-', "_").to_ascii_uppercase());
-    if let Some(path) = env::var_os(&env_name).filter(|value| !value.is_empty()) {
-        return PathBuf::from(path);
-    }
-
-    let candidate_names = binary_candidate_names(binary_name);
-    let candidates = resolve_binary_candidates(&candidate_names);
-
-    for candidate in candidates {
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-
-    PathBuf::from(candidate_names.into_iter().next().unwrap_or_else(|| binary_file_name(binary_name)))
-}
-
-fn resolve_binary_candidates(candidate_names: &[String]) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-
-    if let Ok(current_exe) = env::current_exe() {
-        for file_name in candidate_names {
-            push_exe_relative_candidates(&mut candidates, current_exe.parent(), file_name);
-        }
-    }
-
-    if let Ok(cwd) = env::current_dir() {
-        for file_name in candidate_names {
-            push_exe_relative_candidates(&mut candidates, Some(cwd.as_path()), file_name);
-        }
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(workspace_root) = manifest_dir.ancestors().nth(3) {
-        let target_dir = workspace_root.join("target");
-        let build_bin_dir = workspace_root.join("build").join("bin").join("win32-x64");
-        for file_name in candidate_names {
-            candidates.push(build_bin_dir.join(file_name));
-            candidates.push(target_dir.join("debug").join(file_name));
-            candidates.push(target_dir.join("release").join(file_name));
-            candidates.push(target_dir.join(file_name));
-            candidates.push(target_dir.join("debug").join("deps").join(file_name));
-            candidates.push(target_dir.join("release").join("deps").join(file_name));
-            candidates.push(target_dir.join("deps").join(file_name));
-        }
-    }
-
-    let mut seen = HashSet::new();
-    candidates.into_iter().filter(|candidate| seen.insert(candidate.clone())).collect()
-}
-
-fn push_exe_relative_candidates(
-    candidates: &mut Vec<PathBuf>,
-    start: Option<&Path>,
-    file_name: &str,
-) {
-    let Some(start) = start else {
-        return;
-    };
-
-    let mut current = Some(start);
-    for _ in 0..4 {
-        let Some(dir) = current else {
-            break;
-        };
-        candidates.push(dir.join(file_name));
-        candidates.push(dir.join("resources").join(file_name));
-        candidates.push(dir.join("resources").join("bin").join(file_name));
-        candidates.push(dir.join("bin").join(file_name));
-        current = dir.parent();
-    }
-}
-
-fn binary_file_name(binary_name: &str) -> String {
-    if cfg!(target_os = "windows") { format!("{binary_name}.exe") } else { binary_name.to_owned() }
-}
-
-fn binary_candidate_names(binary_name: &str) -> Vec<String> {
-    let mut names = vec![binary_file_name(binary_name)];
-    if let Some(sidecar_name) = sidecar_binary_file_name(binary_name) {
-        names.push(sidecar_name);
-    }
-    match binary_name {
-        "rtc-agentd" => {
-            names.push(binary_file_name("rtc-agent"));
-            if let Some(sidecar_name) = sidecar_binary_file_name("rtc-agent") {
-                names.push(sidecar_name);
-            }
-        }
-        "rtc-agent" => {
-            names.push(binary_file_name("rtc-agentd"));
-            if let Some(sidecar_name) = sidecar_binary_file_name("rtc-agentd") {
-                names.push(sidecar_name);
-            }
-        }
-        _ => {}
-    }
-    let mut seen = HashSet::new();
-    names.into_iter().filter(|name| seen.insert(name.clone())).collect()
-}
-
-fn sidecar_binary_file_name(binary_name: &str) -> Option<String> {
-    let target_triple = tauri_sidecar_target_triple()?;
-    let extension = if cfg!(target_os = "windows") { ".exe" } else { "" };
-    Some(format!("{binary_name}-{target_triple}{extension}"))
-}
-
-fn tauri_sidecar_target_triple() -> Option<&'static str> {
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-pc-windows-msvc");
-    }
-    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-pc-windows-msvc");
-    }
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-apple-darwin");
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-apple-darwin");
-    }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    {
-        return Some("x86_64-unknown-linux-gnu");
-    }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    {
-        return Some("aarch64-unknown-linux-gnu");
-    }
-    #[allow(unreachable_code)]
-    None
-}
-
 fn open_path_in_file_manager(path: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = Command::new("explorer");
+        let mut command = StdCommand::new("explorer");
         command.arg(path);
         apply_no_window(&mut command);
         command
@@ -608,14 +465,14 @@ fn open_path_in_file_manager(path: &str) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     let mut command = {
-        let mut command = Command::new("open");
+        let mut command = StdCommand::new("open");
         command.arg(path);
         command
     };
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let mut command = {
-        let mut command = Command::new("xdg-open");
+        let mut command = StdCommand::new("xdg-open");
         command.arg(path);
         command
     };
@@ -623,14 +480,505 @@ fn open_path_in_file_manager(path: &str) -> Result<()> {
     command.spawn().map(|_| ()).map_err(|err| anyhow!("failed to open `{path}`: {err}"))
 }
 
+fn build_status_payload() -> Result<StatusPayload> {
+    let config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    let effective =
+        resolve_default_shell(config.default_shell_type, &snapshot.diagnostics.available_shells);
+    Ok(StatusPayload {
+        version: VERSION.to_owned(),
+        server_base_url: config.server_base_url.clone(),
+        config_file: config.config_file_path.display().to_string(),
+        preferences_file: config.preferences_file_path.display().to_string(),
+        registration_token: if config.registration_token.is_some() {
+            "configured".into()
+        } else {
+            "missing".into()
+        },
+        registration_token_source: if config.registration_token.is_some() {
+            if has_registration_token_env_override() {
+                "environment variable RTC_REGISTRATION_TOKEN".into()
+            } else {
+                "config file".into()
+            }
+        } else {
+            "none".into()
+        },
+        run_heartbeat: config.run_heartbeat,
+        run_tunnel: config.run_tunnel,
+        configured_default_shell: config.default_shell_type.as_str().to_owned(),
+        effective_default_shell: effective.as_str().to_owned(),
+        available_shells: snapshot
+            .diagnostics
+            .available_shells
+            .iter()
+            .map(|item| item.as_str().to_owned())
+            .collect(),
+        ssh_available: snapshot.diagnostics.ssh_check.available,
+        ssh_detail: snapshot.diagnostics.ssh_check.detail.clone(),
+        platform: match snapshot.platform {
+            Some(platform) => serde_json::to_value(platform)?.as_str().unwrap_or("unknown").to_owned(),
+            None => "unknown".into(),
+        },
+        arch: snapshot.arch,
+        preferences_summary: read_preferences_summary(&config.preferences_file_path),
+    })
+}
+
+fn runtime_config() -> RuntimeConfig {
+    read_runtime_config(default_server_base_url())
+}
+
+fn read_preferences_summary(path: &Path) -> PreferencesSummary {
+    let store = PreferencesStore::new(path);
+    let preferences = store.get_preferences();
+    PreferencesSummary {
+        default_working_directory: preferences.default_working_directory,
+        shortcuts_count: preferences.shortcuts.len(),
+        quick_commands_count: preferences.quick_commands.len(),
+    }
+}
+
+async fn run_agent_supervisor(app: AppHandle, state: Arc<DesktopState>) {
+    let mut retry_attempt = 0_u32;
+    loop {
+        if !desired_running(&state) {
+            update_runtime_snapshot(&state, |runtime| {
+                runtime.phase = DesktopRuntimePhase::Stopped;
+                runtime.connected = false;
+                runtime.websocket_url = None;
+            });
+            emit_agent_state(&app, &state).await;
+            break;
+        }
+
+        let run_result = run_agent_once_in_process(&app, Arc::clone(&state)).await;
+        if let Err(err) = run_result {
+            retry_attempt = retry_attempt.saturating_add(1);
+            let delay = compute_retry_delay(retry_attempt);
+            update_runtime_snapshot(&state, |runtime| {
+                runtime.phase = DesktopRuntimePhase::Reconnecting;
+                runtime.connected = false;
+                runtime.last_error = Some(user_facing_error(&err));
+                runtime.retry_attempt = retry_attempt;
+                runtime.websocket_url = None;
+            });
+            push_log_entry_and_emit(
+                &app,
+                &state,
+                "stderr",
+                format!(
+                    "[remote-terminal-cloud-agent] runtime error: {}",
+                    user_facing_error(&err)
+                ),
+            );
+            push_log_entry_and_emit(
+                &app,
+                &state,
+                "stdout",
+                format!(
+                    "[remote-terminal-cloud-agent] reconnect scheduled in {}s (attempt {}).",
+                    delay.as_secs(),
+                    retry_attempt
+                ),
+            );
+            emit_agent_state(&app, &state).await;
+            tokio::time::sleep(delay).await;
+            continue;
+        }
+        retry_attempt = 0;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    if let Ok(mut agent) = state.agent.lock() {
+        agent.task = None;
+        if !agent.desired_running {
+            agent.runtime.phase = DesktopRuntimePhase::Stopped;
+        }
+        agent.runtime.connected = false;
+        agent.runtime.websocket_url = None;
+    }
+}
+
+async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) -> Result<()> {
+    update_runtime_snapshot(&state, |runtime| {
+        runtime.phase = DesktopRuntimePhase::Registering;
+        runtime.connected = false;
+        runtime.last_error = None;
+        runtime.websocket_url = None;
+    });
+    emit_agent_state(app, &state).await;
+
+    let mut config = runtime_config();
+    let logs_dir = managed_logs_dir();
+    let snapshot = collect_host_snapshot(
+        VERSION,
+        &config.enabled_shell_types,
+        logs_dir.display().to_string(),
+    )?;
+    let effective_default_shell =
+        resolve_default_shell(config.default_shell_type, &snapshot.diagnostics.available_shells);
+
+    push_log_entry_and_emit(
+        app,
+        state.as_ref(),
+        "stdout",
+        format!(
+            "[remote-terminal-cloud-agent] config file: {}",
+            config.config_file_path.display()
+        ),
+    );
+    push_log_entry_and_emit(
+        app,
+        state.as_ref(),
+        "stdout",
+        "[remote-terminal-cloud-agent] host snapshot".into(),
+    );
+    push_log_entry_and_emit(
+        app,
+        state.as_ref(),
+        "stdout",
+        serde_json::to_string_pretty(&snapshot).unwrap_or_else(|_| "{}".into()),
+    );
+    push_log_entry_and_emit(
+        app,
+        state.as_ref(),
+        "stdout",
+        format!(
+            "[remote-terminal-cloud-agent] shell capabilities: {}",
+            join_shells(&snapshot.diagnostics.available_shells)
+        ),
+    );
+
+    if config.registration_token.is_none() {
+        update_runtime_snapshot(&state, |runtime| {
+            runtime.phase = DesktopRuntimePhase::WaitingConfig;
+            runtime.connected = false;
+            runtime.last_error = None;
+        });
+        push_log_entry_and_emit(
+            app,
+            state.as_ref(),
+            "stdout",
+            format!(
+                "[remote-terminal-cloud-agent] waiting for configuration: update {} and the desktop agent will retry automatically.",
+                config.config_file_path.display()
+            ),
+        );
+        tokio::time::sleep(MISSING_CONFIG_RETRY).await;
+        return Ok(());
+    }
+
+    let Some(registration_token) = config.registration_token.take() else {
+        return Ok(());
+    };
+
+    let api_client = ApiClient::default();
+    let session = match api_client
+        .register_agent(&config.server_base_url, &registration_token, snapshot)
+        .await
+    {
+        Ok(session) => session,
+        Err(err) => {
+            update_runtime_snapshot(&state, |runtime| {
+                runtime.phase = DesktopRuntimePhase::Error;
+                runtime.connected = false;
+                runtime.last_error = Some(user_facing_error(&err));
+            });
+            emit_agent_state(app, &state).await;
+            push_log_entry_and_emit(
+                app,
+                state.as_ref(),
+                "stderr",
+                format!("[remote-terminal-cloud-agent] registration failed: {}", user_facing_error(&err)),
+            );
+            return Err(err);
+        }
+    };
+    push_log_entry_and_emit(
+        app,
+        state.as_ref(),
+        "stdout",
+        format!("[remote-terminal-cloud-agent] registered device {}", session.device_id),
+    );
+    update_runtime_snapshot(&state, |runtime| {
+        runtime.phase = DesktopRuntimePhase::Online;
+        runtime.connected = false;
+        runtime.registered_device_id = Some(session.device_id.clone());
+        runtime.retry_attempt = 0;
+        runtime.last_error = None;
+    });
+    emit_agent_state(app, &state).await;
+
+    if !config.run_heartbeat && !config.run_tunnel {
+        push_log_entry_and_emit(
+            app,
+            state.as_ref(),
+            "stdout",
+            "[remote-terminal-cloud-agent] heartbeat and tunnel are both disabled; retrying later."
+                .into(),
+        );
+        tokio::time::sleep(MISSING_CONFIG_RETRY).await;
+        return Ok(());
+    }
+
+    let mut tasks = tokio::task::JoinSet::<(&'static str, Result<()>)>::new();
+
+    if config.run_heartbeat {
+        let api_client = api_client.clone();
+        let server_base_url = config.server_base_url.clone();
+        let enabled_shell_types = config.enabled_shell_types.clone();
+        let logs_dir = logs_dir.clone();
+        let app_handle = app.clone();
+        let state_ref = Arc::clone(&state);
+        let mut heartbeat_session = session.clone();
+        tasks.spawn(async move {
+            let result: Result<()> = async {
+                loop {
+                tokio::time::sleep(Duration::from_secs(
+                    heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
+                ))
+                .await;
+
+                let heartbeat_snapshot = collect_host_snapshot(
+                    VERSION,
+                    &enabled_shell_types,
+                    logs_dir.display().to_string(),
+                )?;
+                heartbeat_session = api_client
+                    .send_heartbeat(&server_base_url, &heartbeat_session, heartbeat_snapshot)
+                    .await?;
+                update_runtime_snapshot(&state_ref, |runtime| {
+                    runtime.last_heartbeat_at = Some(format_rfc3339_now());
+                    runtime.retry_attempt = 0;
+                    runtime.connected = true;
+                    if runtime.websocket_url.is_some() {
+                        runtime.phase = DesktopRuntimePhase::Online;
+                    }
+                });
+                push_log_entry_and_emit(
+                    &app_handle,
+                    state_ref.as_ref(),
+                    "stdout",
+                    format!(
+                        "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
+                        heartbeat_session.device_id, heartbeat_session.heartbeat_interval_seconds
+                    ),
+                );
+                emit_agent_state(&app_handle, &state_ref).await;
+            }
+            #[allow(unreachable_code)]
+                Ok(())
+            }
+            .await;
+            ("heartbeat", result)
+        });
+    };
+
+    if config.run_tunnel {
+        let server_base_url = config.server_base_url.clone();
+        let preferences_file_path = config.preferences_file_path.clone();
+        let app_handle = app.clone();
+        let state_ref = Arc::clone(&state);
+        tasks.spawn(async move {
+            let result = run_agent_tunnel_with_connect_hook(
+                &server_base_url,
+                session,
+                effective_default_shell,
+                &preferences_file_path,
+                |websocket_url| {
+                    update_runtime_snapshot(&state_ref, |runtime| {
+                        runtime.connected = true;
+                        runtime.phase = DesktopRuntimePhase::Online;
+                        runtime.websocket_url = Some(websocket_url.to_owned());
+                        runtime.last_error = None;
+                    });
+                    push_log_entry_and_emit(
+                        &app_handle,
+                        state_ref.as_ref(),
+                        "stdout",
+                        format!(
+                            "[remote-terminal-cloud-agent] websocket connected: {}",
+                            websocket_url
+                        ),
+                    );
+                },
+            )
+            .await;
+            ("tunnel", result)
+        });
+    }
+
+    if config.run_tunnel {
+        match tasks.join_next().await {
+            Some(Ok((source, Ok(())))) => {
+                tasks.abort_all();
+                update_runtime_snapshot(&state, |runtime| {
+                    runtime.connected = false;
+                    runtime.websocket_url = None;
+                    runtime.phase = DesktopRuntimePhase::Reconnecting;
+                    runtime.last_error = Some(
+                        format!(
+                            "{} disconnected. Reconnecting to the backend.",
+                            if source == "tunnel" { "WebSocket tunnel" } else { "Heartbeat loop" }
+                        ),
+                    );
+                });
+                emit_agent_state(app, &state).await;
+                bail!("{source} disconnected")
+            }
+            Some(Ok((_, Err(err)))) => {
+                tasks.abort_all();
+                update_runtime_snapshot(&state, |runtime| {
+                    runtime.connected = false;
+                    runtime.websocket_url = None;
+                    runtime.phase = DesktopRuntimePhase::Reconnecting;
+                    runtime.last_error = Some(user_facing_error(&err));
+                });
+                emit_agent_state(app, &state).await;
+                Err(err)
+            }
+            Some(Err(err)) => {
+                tasks.abort_all();
+                update_runtime_snapshot(&state, |runtime| {
+                    runtime.connected = false;
+                    runtime.websocket_url = None;
+                    runtime.phase = DesktopRuntimePhase::Error;
+                    runtime.last_error = Some(err.to_string());
+                });
+                emit_agent_state(app, &state).await;
+                bail!("agent background task failed: {err}")
+            }
+            None => {
+                bail!("agent runtime exited without active tasks")
+            }
+        }
+    } else if config.run_heartbeat {
+        match tasks.join_next().await {
+            Some(Ok((_, result))) => result,
+            Some(Err(err)) => Err(anyhow!("heartbeat task failed: {err}")),
+            None => bail!("agent runtime exited without active tasks"),
+        }
+    } else {
+        bail!("agent runtime exited without active tasks")
+    }
+}
+
+fn push_log_entry_and_emit(app: &AppHandle, state: &DesktopState, stream: &str, line: String) {
+    let entry = AgentLogEntry { stream: stream.into(), line };
+    push_log_entry(state, entry.clone());
+    let _ = app.emit("desktop://agent-log", entry);
+}
+
+fn join_shells(items: &[ShellType]) -> String {
+    if items.is_empty() {
+        "none".into()
+    } else {
+        items.iter().map(|item| item.as_str()).collect::<Vec<_>>().join(", ")
+    }
+}
+
+fn user_facing_error(err: &anyhow::Error) -> String {
+    if let Some(details) = describe_error(err) {
+        format!("{} | suggestion: {}", details.message, details.suggestion)
+    } else {
+        err.to_string()
+    }
+}
+
+fn desired_running(state: &DesktopState) -> bool {
+    state.agent.lock().map(|agent| agent.desired_running).unwrap_or(false)
+}
+
+fn update_runtime_snapshot<F>(state: &DesktopState, update: F)
+where
+    F: FnOnce(&mut DesktopRuntimeSnapshot),
+{
+    if let Ok(mut agent) = state.agent.lock() {
+        update(&mut agent.runtime);
+    }
+}
+
+fn compute_retry_delay(retry_attempt: u32) -> Duration {
+    let capped_attempt = retry_attempt.min(6);
+    let scale = 1_u64 << capped_attempt;
+    let secs = RUNTIME_RETRY_INTERVAL.as_secs().saturating_mul(scale);
+    Duration::from_secs(secs.min(MAX_BACKOFF_INTERVAL.as_secs()))
+}
+
+fn runtime_status_summary(
+    runtime: &DesktopRuntimeSnapshot,
+    running: bool,
+    has_token: bool,
+) -> String {
+    match runtime.phase {
+        DesktopRuntimePhase::Online if runtime.connected => {
+            if let Some(device_id) = runtime.registered_device_id.as_deref() {
+                format!("Agent 已在线，设备 ID: {device_id}。心跳与隧道连接正常。")
+            } else {
+                "Agent 已在线，心跳与隧道连接正常。".into()
+            }
+        }
+        DesktopRuntimePhase::Registering | DesktopRuntimePhase::Starting => {
+            "Agent 正在注册并建立隧道连接，请查看下方日志。".into()
+        }
+        DesktopRuntimePhase::Reconnecting => format!(
+            "Agent 连接已中断，正在自动重连（第 {} 次）。{}",
+            runtime.retry_attempt.max(1),
+            runtime.last_error.clone().unwrap_or_else(|| "请查看日志面板。".into())
+        ),
+        DesktopRuntimePhase::WaitingConfig => {
+            "等待配置 Token。保存后桌面端会自动重试注册。".into()
+        }
+        DesktopRuntimePhase::Stopped => {
+            if has_token {
+                "后台 Agent 已停止，可随时重新启动。".into()
+            } else {
+                "Token 是启动后台 Agent 的前提条件。".into()
+            }
+        }
+        DesktopRuntimePhase::Error => runtime
+            .last_error
+            .clone()
+            .unwrap_or_else(|| "后台 Agent 遇到错误，请查看日志。".into()),
+        DesktopRuntimePhase::Idle => {
+            if running {
+                "Agent 进程已启动，正在等待连接状态更新。".into()
+            } else if has_token {
+                "Ready to start in tray background mode.".into()
+            } else {
+                "Token is required before the background agent can start.".into()
+            }
+        }
+        DesktopRuntimePhase::Online => {
+            "Agent 已运行，正在等待最新连接状态。".into()
+        }
+    }
+}
+
+fn format_rfc3339_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_secs();
+    format!("{now}")
+}
+
 #[cfg(target_os = "windows")]
-fn apply_no_window(command: &mut Command) {
+fn apply_no_window(command: &mut StdCommand) {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(not(target_os = "windows"))]
-fn apply_no_window(_command: &mut Command) {}
+fn apply_no_window(_command: &mut StdCommand) {}
 
 fn managed_logs_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
@@ -664,23 +1012,6 @@ fn push_log_entry(state: &DesktopState, entry: AgentLogEntry) {
             let _ = logs.pop_front();
         }
     }
-}
-
-fn spawn_log_reader<R>(app: AppHandle, state: Arc<DesktopState>, stream: &'static str, reader: R)
-where
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-{
-    tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(reader).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let entry = AgentLogEntry {
-                stream: stream.into(),
-                line,
-            };
-            push_log_entry(&state, entry.clone());
-            let _ = app.emit("desktop://agent-log", entry);
-        }
-    });
 }
 
 fn has_saved_registration_token() -> bool {

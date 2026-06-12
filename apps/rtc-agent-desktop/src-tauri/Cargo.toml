@@ -14,6 +14,10 @@ tauri-build.workspace = true
 [dependencies]
 anyhow.workspace = true
 rtc-agent-config = { path = "../../../crates/rtc-agent-config" }
+rtc-agent-platform = { path = "../../../crates/rtc-agent-platform" }
+rtc-agent-preferences = { path = "../../../crates/rtc-agent-preferences" }
+rtc-agent-protocol = { path = "../../../crates/rtc-agent-protocol" }
+rtc-agent-runtime = { path = "../../../crates/rtc-agent-runtime" }
 rtc-agent-service = { path = "../../../crates/rtc-agent-service" }
 serde.workspace = true
 serde_json.workspace = true
@@ -21,6 +25,7 @@ tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-opener.workspace = true
 tauri-plugin-shell.workspace = true
 tokio.workspace = true
+tracing-subscriber.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"
