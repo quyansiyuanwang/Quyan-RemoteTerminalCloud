@@ -291,23 +291,11 @@ fn windows_desktop_bundle_command(
     }
     fs::create_dir_all(&output_dir).with_context(|| format!("create {}", output_dir.display()))?;
 
-    let stage_dir = ctx.project_root.join("target").join("xtask").join("tauri-desktop-bundle");
-    if stage_dir.exists() {
-        fs::remove_dir_all(&stage_dir).with_context(|| format!("remove {}", stage_dir.display()))?;
-    }
-    fs::create_dir_all(&stage_dir).with_context(|| format!("create {}", stage_dir.display()))?;
-
     let tauri_bundle_root = ctx.project_root.join("target").join("release").join("bundle");
     if tauri_bundle_root.exists() {
         fs::remove_dir_all(&tauri_bundle_root)
             .with_context(|| format!("remove stale {}", tauri_bundle_root.display()))?;
     }
-
-    build_desktop_binary(ctx, &stage_dir)?;
-
-    let mut npm = Command::new(node_package_manager_command());
-    npm.current_dir(&desktop_dir).arg("run").arg("build");
-    run_command(&mut npm, "desktop frontend build failed")?;
 
     let tauri_config_patch = serde_json::json!({
         "bundle": {

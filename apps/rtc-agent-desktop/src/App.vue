@@ -429,7 +429,7 @@ onUnmounted(() => {
             <span class="sec-hint">保存后桌面端立即接管</span>
           </div>
           <label class="field-label">Registration Token</label>
-          <input v-model="token" class="field-input" type="password" autocomplete="off" placeholder="rlt_xxxxxxxxxxxxxxxxxxxxxxxx" />
+          <input v-model="token" class="field-input" type="password" autocomplete="off" placeholder="rtm_xxxxxxxxxxxxxxxxxxxxxxxx" />
           <button class="btn btn-primary btn-block" @click="saveToken" :disabled="tokenSaving">
             {{ tokenSaving ? '保存中…' : '保存并接管运行' }}
           </button>
