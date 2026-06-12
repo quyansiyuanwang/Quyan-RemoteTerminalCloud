@@ -285,6 +285,10 @@ fn windows_desktop_bundle_command(
     let output_dir = output_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| ctx.project_root.join("release").join("artifacts").join("windows-installers").join("tauri"));
+    if output_dir.exists() {
+        fs::remove_dir_all(&output_dir)
+            .with_context(|| format!("remove stale {}", output_dir.display()))?;
+    }
     fs::create_dir_all(&output_dir).with_context(|| format!("create {}", output_dir.display()))?;
 
     let stage_dir = ctx.project_root.join("target").join("xtask").join("tauri-desktop-bundle");
@@ -292,6 +296,12 @@ fn windows_desktop_bundle_command(
         fs::remove_dir_all(&stage_dir).with_context(|| format!("remove {}", stage_dir.display()))?;
     }
     fs::create_dir_all(&stage_dir).with_context(|| format!("create {}", stage_dir.display()))?;
+
+    let tauri_bundle_root = ctx.project_root.join("target").join("release").join("bundle");
+    if tauri_bundle_root.exists() {
+        fs::remove_dir_all(&tauri_bundle_root)
+            .with_context(|| format!("remove stale {}", tauri_bundle_root.display()))?;
+    }
 
     build_desktop_binary(ctx, &stage_dir)?;
 
@@ -332,7 +342,6 @@ fn windows_desktop_bundle_command(
     }
     run_command(&mut tauri, "tauri desktop bundle failed")?;
 
-    let tauri_bundle_root = ctx.project_root.join("target").join("release").join("bundle");
     if tauri_bundle_root.exists() {
         copy_tree(&tauri_bundle_root, &output_dir)?;
     }
