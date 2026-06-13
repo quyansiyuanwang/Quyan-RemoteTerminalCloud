@@ -150,8 +150,8 @@ struct VerifyErrorDetails {
 
 fn main() -> Result<()> {
     // musl static binaries buffer stdout in non-TTY mode; clap --help/--version
-    // calls exit() before any flush, so force unbuffered stdout here.
-    #[cfg(not(windows))]
+    // calls exit() before any flush. Only needed on musl targets.
+    #[cfg(target_env = "musl")]
     unsafe {
         #[allow(non_camel_case_types)]
         type libc_FILE = std::ffi::c_void;
