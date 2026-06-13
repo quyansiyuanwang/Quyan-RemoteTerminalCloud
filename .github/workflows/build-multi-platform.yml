@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -41,7 +43,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     needs: validate-release-tag
-    if: needs.validate-release-tag.result == 'success'
+    if: always() && (needs.validate-release-tag.result == 'success' || needs.validate-release-tag.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
