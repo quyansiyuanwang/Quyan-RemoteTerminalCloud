@@ -118,10 +118,14 @@ jobs:
           targets: ${{ matrix.rust_target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rust_target }}
 
       - name: Install cross (Linux cross-compile)
         if: matrix.cross == true && matrix.target_platform == 'linux'
-        run: cargo install cross --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
       - name: Setup Linux desktop build deps
         if: matrix.target_platform == 'linux' && matrix.cross == false
@@ -134,7 +138,7 @@ jobs:
             patchelf
 
       - name: Install desktop frontend dependencies
-        if: matrix.target_platform != 'linux' || matrix.cross == false
+        if: (matrix.installer_glob != '' || matrix.desktop_glob != '') && matrix.cross == false
         run: npm ci
         working-directory: apps/rtc-agent-desktop
 
