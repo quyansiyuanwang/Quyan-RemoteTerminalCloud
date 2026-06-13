@@ -63,8 +63,6 @@ jobs:
             target_arch: arm64
             rust_target: aarch64-unknown-linux-gnu
             cross: true
-            installer_glob: release/artifacts/linux-arm64/*.deb
-            archive_glob: release/artifacts/linux-arm64/*.tar.gz
             portable_bin: build/bin/linux-arm64/rtc-agent
           # ── macOS ────────────────────────────────────────────────────────────
           - name: macos-arm64
@@ -77,13 +75,11 @@ jobs:
             desktop_glob: release/artifacts/darwin-arm64/*.dmg
             portable_bin: build/bin/darwin-arm64/rtc-agent
           - name: macos-x64
-            os: macos-13
+            os: macos-latest
             target_platform: darwin
             target_arch: x64
             rust_target: x86_64-apple-darwin
-            cross: false
-            installer_glob: release/artifacts/darwin-x64/*.pkg
-            desktop_glob: release/artifacts/darwin-x64/*.dmg
+            cross: true
             portable_bin: build/bin/darwin-x64/rtc-agent
           # ── Windows ──────────────────────────────────────────────────────────
           - name: windows-x64
@@ -122,7 +118,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cross (Linux cross-compile)
-        if: matrix.cross == true
+        if: matrix.cross == true && matrix.target_platform == 'linux'
         run: cargo install cross --locked
 
       - name: Setup Linux desktop build deps
@@ -141,7 +137,7 @@ jobs:
         working-directory: apps/rtc-agent-desktop
 
       - name: Build portable binary (cross)
-        if: matrix.cross == true
+        if: matrix.cross == true && matrix.target_platform == 'linux'
         env:
           RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
@@ -149,6 +145,16 @@ jobs:
           cross build --release -p rtc-agentd --target ${{ matrix.rust_target }}
           mkdir -p build/bin/${{ matrix.target_platform }}-${{ matrix.target_arch }}
           cp target/${{ matrix.rust_target }}/release/rtc-agentd build/bin/${{ matrix.target_platform }}-${{ matrix.target_arch }}/rtc-agent
+
+      - name: Build portable binary (macOS x64 cross-compile)
+        if: matrix.cross == true && matrix.target_platform == 'darwin'
+        env:
+          RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
+          RTC_TARGET_ARCH: ${{ matrix.target_arch }}
+        run: |
+          cargo build --release -p rtc-agentd --target ${{ matrix.rust_target }}
+          mkdir -p build/bin/darwin-x64
+          cp target/${{ matrix.rust_target }}/release/rtc-agentd build/bin/darwin-x64/rtc-agent
 
       - name: Build portable binary (Windows arm64)
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'arm64'
