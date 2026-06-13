@@ -178,6 +178,22 @@ Windows 安装完成后，可以直接从开始菜单打开 `Remote Terminal Clo
 
 Windows 服务模式已降为可选兼容模式，不再是默认用户路径。
 
+## Portable
+
+每个 Release 包含各平台的便携版单文件可执行程序，无需安装，直接运行：
+
+```bash
+# Linux / macOS
+chmod +x rtc-agent-<ver>-linux-x64
+RTC_REGISTRATION_TOKEN=your-token ./rtc-agent-<ver>-linux-x64 run
+
+# Windows
+$env:RTC_REGISTRATION_TOKEN = "your-token"
+.\rtc-agent-<ver>-win32-x64.exe run
+```
+
+详见 [docs/PORTABLE.md](docs/PORTABLE.md)。
+
 ## Release
 
 版本号由根目录的 `VERSION` 文件提供。
