@@ -362,7 +362,7 @@ async fn ensure_agent_started(
     let service_state = service::service_status();
     if looks_like_service_running(&service_state.message) {
         bail!(
-            "Windows Service appears to be active. Stop the service before using desktop background mode to avoid duplicate agent connections."
+            "Background service appears to be active. Stop the service before using desktop background mode to avoid duplicate agent connections."
         );
     }
 
@@ -1181,7 +1181,11 @@ fn is_autostart_enabled() -> bool {
             .map(|value| !value.trim().is_empty())
             .unwrap_or(false);
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        return macos_autostart_plist_path().exists();
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         false
     }
@@ -1196,9 +1200,39 @@ fn enable_autostart() -> Result<()> {
             .context("update autostart registry value")?;
         return Ok(());
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        bail!("autostart management is currently implemented for Windows only")
+        let exe = env::current_exe().context("resolve current desktop executable")?;
+        let plist_path = macos_autostart_plist_path();
+        if let Some(parent) = plist_path.parent() {
+            fs::create_dir_all(parent).context("create LaunchAgents directory")?;
+        }
+        let plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.remote-terminal-cloud.agent.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{exe}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>
+"#,
+            exe = exe.display()
+        );
+        fs::write(&plist_path, plist).context("write LaunchAgent plist")?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        bail!("autostart management is currently implemented for Windows and macOS only")
     }
 }
 
@@ -1215,10 +1249,24 @@ fn disable_autostart() -> Result<()> {
         }
         return Ok(());
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        bail!("autostart management is currently implemented for Windows only")
+        let plist_path = macos_autostart_plist_path();
+        if plist_path.exists() {
+            fs::remove_file(&plist_path).context("remove LaunchAgent plist")?;
+        }
+        return Ok(());
     }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        bail!("autostart management is currently implemented for Windows and macOS only")
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_autostart_plist_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".into());
+    Path::new(&home).join("Library/LaunchAgents/com.remote-terminal-cloud.agent.desktop.plist")
 }
 
 #[cfg(target_os = "windows")]

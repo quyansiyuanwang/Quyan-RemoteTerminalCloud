@@ -21,7 +21,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": ["nsis", "dmg"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
@@ -29,6 +34,9 @@
         "installMode": "perMachine",
         "template": "nsis/installer.nsi"
       }
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0"
     }
   }
 }
