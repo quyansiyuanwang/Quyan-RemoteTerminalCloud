@@ -167,11 +167,18 @@ jobs:
           Copy-Item target/${{ matrix.rust_target }}/release/rtc-agentd.exe build/bin/win32-arm64/rtc-agent.exe
 
       - name: Build platform artifact
-        if: matrix.cross == false && !(matrix.target_platform == 'win32' && matrix.target_arch == 'arm64')
+        if: matrix.cross == false && matrix.target_platform != 'win32'
         env:
           RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
         run: cargo xtask artifact
+
+      - name: Build Windows portable binary
+        if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
+        run: |
+          cargo build --release -p rtc-agentd
+          New-Item -ItemType Directory -Force build/bin/win32-x64
+          Copy-Item target/release/rtc-agentd.exe build/bin/win32-x64/rtc-agent.exe
 
       - name: Build Windows desktop bundle
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
@@ -237,7 +244,7 @@ jobs:
 
       - name: Generate SHA256 checksums
         run: |
-          find release-assets -type f \( -name '*.tar.gz' -o -name '*.exe' -o -name '*.deb' -o -name '*.pkg' -o -name '*.dmg' -o -name 'rtc-agent-*' \) -print0 \
+          find release-assets -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.pkg' -o -name '*.dmg' -o -name 'rtc-agent-*' \) -print0 \
             | sort -z \
             | xargs -0 sha256sum > release-assets/SHA256SUMS.txt
 
@@ -250,7 +257,6 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
           files: |
-            release-assets/**/*.tar.gz
             release-assets/**/*.exe
             release-assets/**/*.deb
             release-assets/**/*.pkg
