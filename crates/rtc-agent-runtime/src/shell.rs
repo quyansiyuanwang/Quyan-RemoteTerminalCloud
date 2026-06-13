@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 
 use anyhow::{Context, Result, anyhow};
@@ -346,6 +346,10 @@ impl ShellSession {
 
 fn build_shell_env() -> Vec<(String, String)> {
     let mut env = std::env::vars().collect::<Vec<_>>();
+
+    #[cfg(target_os = "macos")]
+    merge_shell_env(&mut env);
+
     env.push(("TERM".into(), env_or_default("TERM", "xterm-256color")));
     env.push(("COLORTERM".into(), env_or_default("COLORTERM", "truecolor")));
     env.push(("TERM_PROGRAM".into(), env_or_default("TERM_PROGRAM", "remote-terminal-cloud")));
@@ -354,6 +358,54 @@ fn build_shell_env() -> Vec<(String, String)> {
         env.push(("ConEmuANSI".into(), env_or_default("ConEmuANSI", "ON")));
     }
     env
+}
+
+#[cfg(target_os = "macos")]
+fn merge_shell_env(env: &mut Vec<(String, String)>) {
+    let shell_env = macos_user_shell_env();
+    for (key, value) in shell_env {
+        if let Some(pos) = env.iter().position(|(k, _)| k == key) {
+            env[pos] = (key.clone(), value.clone());
+        } else {
+            env.push((key.clone(), value.clone()));
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_user_shell_env() -> &'static [(String, String)] {
+    static SHELL_ENV: LazyLock<Vec<(String, String)>> = LazyLock::new(load_macos_user_shell_env);
+    &SHELL_ENV
+}
+
+#[cfg(target_os = "macos")]
+fn load_macos_user_shell_env() -> Vec<(String, String)> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let Ok(output) = std::process::Command::new(&shell)
+        .args(["-l", "-c", "env"])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let Ok(stdout) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+
+    let skip_keys =
+        ["SHLVL", "ZSH_EVAL_CONTEXT", "BASH_REMATCH", "BASH_SUBSHELL", "_", "PWD", "OLDPWD"];
+    let mut result = Vec::new();
+    for line in stdout.lines() {
+        if let Some(pos) = line.find('=') {
+            let key = &line[..pos];
+            if !key.is_empty() && !skip_keys.contains(&key) {
+                result.push((key.to_string(), line[pos + 1..].to_string()));
+            }
+        }
+    }
+    result
 }
 
 fn env_or_default(key: &str, fallback: &str) -> String {
