@@ -156,7 +156,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
     let command = cli.command.unwrap_or(Command::Run);
-    match command {
+    let result = match command {
         Command::Configure(flag) | Command::Conf(flag) => run_configure(flag.json),
         Command::Version(flag) | Command::Ver(flag) => run_version(flag.json),
         Command::Paths(flag) | Command::Path(flag) => run_paths(flag.json),
@@ -179,7 +179,10 @@ fn main() -> Result<()> {
             runtime.block_on(run_agent_once())
         }
         Command::Service(args) => run_service(args),
-    }
+    };
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    result
 }
 
 fn run_configure(as_json: bool) -> Result<()> {

@@ -40,13 +40,16 @@ struct InstallerPaths {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+    let result = match cli.command {
         Some(Command::Windows(args)) => run_windows(args),
         None => {
             print_help(false)?;
             Ok(())
         }
-    }
+    };
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    result
 }
 
 fn run_windows(args: WindowsArgs) -> Result<()> {
