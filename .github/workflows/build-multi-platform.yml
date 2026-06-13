@@ -81,6 +81,8 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Setup Linux desktop build deps
         if: matrix.target_platform == 'linux'
         run: |
