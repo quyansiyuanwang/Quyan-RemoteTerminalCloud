@@ -149,6 +149,19 @@ struct VerifyErrorDetails {
 }
 
 fn main() -> Result<()> {
+    // musl static binaries buffer stdout in non-TTY mode; clap --help/--version
+    // calls exit() before any flush, so force unbuffered stdout here.
+    #[cfg(not(windows))]
+    unsafe {
+        extern "C" {
+            fn setvbuf(stream: *mut libc_FILE, buf: *mut u8, mode: i32, size: usize) -> i32;
+            static mut stdout: *mut libc_FILE;
+        }
+        #[allow(non_camel_case_types)]
+        type libc_FILE = std::ffi::c_void;
+        setvbuf(stdout, std::ptr::null_mut(), 2 /* _IONBF */, 0);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
