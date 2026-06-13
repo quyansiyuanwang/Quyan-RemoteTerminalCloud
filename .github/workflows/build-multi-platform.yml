@@ -77,11 +77,11 @@ jobs:
             desktop_glob: release/artifacts/darwin-arm64/*.dmg
             portable_bin: build/bin/darwin-arm64/rtc-agent
           - name: macos-x64
-            os: macos-latest
+            os: macos-13
             target_platform: darwin
             target_arch: x64
             rust_target: x86_64-apple-darwin
-            cross: true
+            cross: false
             portable_bin: build/bin/darwin-x64/rtc-agent
           # ── Windows ──────────────────────────────────────────────────────────
           - name: windows-x64
@@ -129,13 +129,10 @@ jobs:
 
       - name: Setup Linux desktop build deps
         if: matrix.target_platform == 'linux' && matrix.cross == false
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          version: 1.0
 
       - name: Install desktop frontend dependencies
         if: (matrix.installer_glob != '' || matrix.desktop_glob != '') && matrix.cross == false
@@ -151,16 +148,6 @@ jobs:
           cross build --release -p rtc-agentd --target ${{ matrix.rust_target }}
           mkdir -p build/bin/${{ matrix.target_platform }}-${{ matrix.target_arch }}
           cp target/${{ matrix.rust_target }}/release/rtc-agentd build/bin/${{ matrix.target_platform }}-${{ matrix.target_arch }}/rtc-agent
-
-      - name: Build portable binary (macOS x64 cross-compile)
-        if: matrix.cross == true && matrix.target_platform == 'darwin'
-        env:
-          RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
-          RTC_TARGET_ARCH: ${{ matrix.target_arch }}
-        run: |
-          cargo build --release -p rtc-agentd --target ${{ matrix.rust_target }}
-          mkdir -p build/bin/darwin-x64
-          cp target/${{ matrix.rust_target }}/release/rtc-agentd build/bin/darwin-x64/rtc-agent
 
       - name: Build portable binary (Windows arm64)
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'arm64'
@@ -190,7 +177,7 @@ jobs:
           Copy-Item target/release/rtc-agentd.exe build/bin/win32-x64/rtc-agent.exe
 
       - name: Build macOS desktop bundle (.app/.dmg)
-        if: matrix.target_platform == 'darwin'
+        if: matrix.target_platform == 'darwin' && matrix.desktop_glob != ''
         env:
           RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
