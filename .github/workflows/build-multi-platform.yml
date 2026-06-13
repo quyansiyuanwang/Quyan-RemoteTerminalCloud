@@ -132,7 +132,7 @@ jobs:
             patchelf
 
       - name: Install desktop frontend dependencies
-        if: matrix.installer_glob != '' || matrix.desktop_glob != ''
+        if: matrix.target_platform != 'linux' || matrix.cross == false
         run: npm ci
         working-directory: apps/rtc-agent-desktop
 
