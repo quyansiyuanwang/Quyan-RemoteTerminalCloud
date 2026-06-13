@@ -28,7 +28,9 @@ struct ShellSessionManagerState {
 struct ShellSession {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
-    child: Mutex<Box<dyn Child + Send>>,
+    // Option so spawn_waiter can take ownership before blocking on wait(),
+    // freeing the lock so shutdown()'s kill() call is never blocked.
+    child: Mutex<Option<Box<dyn Child + Send>>>,
     closed: AtomicBool,
 }
 
@@ -176,7 +178,7 @@ impl ShellSessionManager {
         let session = Arc::new(ShellSession {
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
-            child: Mutex::new(child),
+            child: Mutex::new(Some(child)),
             closed: AtomicBool::new(false),
         });
 
@@ -268,7 +270,14 @@ impl ShellSessionManager {
     fn spawn_waiter(&self, session_id: String, session: Arc<ShellSession>) {
         let manager = self.clone();
         thread::spawn(move || {
-            let wait_result = session.child.lock().expect("child").wait();
+            // Take ownership of the child out of the mutex before blocking on wait().
+            // This frees the lock so that a concurrent shutdown() call can call kill()
+            // without deadlocking on the same Mutex<Option<Child>>.
+            let child = session.child.lock().expect("child").take();
+            let wait_result = match child {
+                Some(mut c) => c.wait(),
+                None => return, // already taken / shut down
+            };
             session.closed.store(true, Ordering::SeqCst);
             manager.state.sessions.lock().expect("sessions").remove(&session_id);
             match wait_result {
@@ -338,8 +347,12 @@ impl ShellSession {
         if self.closed.swap(true, Ordering::SeqCst) {
             return;
         }
-        if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
+        // If spawn_waiter already took the child, kill() is a no-op — that's fine,
+        // the child will exit naturally once the PTY master is dropped.
+        if let Ok(mut guard) = self.child.lock() {
+            if let Some(ref mut c) = *guard {
+                let _ = c.kill();
+            }
         }
     }
 }

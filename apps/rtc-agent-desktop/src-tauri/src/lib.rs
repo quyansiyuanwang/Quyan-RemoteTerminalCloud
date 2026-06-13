@@ -1069,6 +1069,7 @@ fn apply_no_window(command: &mut StdCommand) {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn apply_no_window(_command: &mut StdCommand) {}
 
 fn managed_logs_dir() -> PathBuf {

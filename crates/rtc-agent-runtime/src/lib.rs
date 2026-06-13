@@ -215,8 +215,14 @@ where
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<String>();
     let shell_manager = ShellSessionManager::new(default_shell_type, outbound_tx.clone());
     let preferences_store = PreferencesStore::new(preferences_file_path);
-    let mut keepalive = tokio::time::interval(WEBSOCKET_KEEPALIVE_INTERVAL);
-    let mut watchdog = tokio::time::interval(Duration::from_secs(5));
+    let mut keepalive = tokio::time::interval_at(
+        tokio::time::Instant::now() + WEBSOCKET_KEEPALIVE_INTERVAL,
+        WEBSOCKET_KEEPALIVE_INTERVAL,
+    );
+    let mut watchdog = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(5),
+        Duration::from_secs(5),
+    );
     let mut last_activity_at = Instant::now();
     let mut pending_ping_at: Option<Instant> = None;
 
