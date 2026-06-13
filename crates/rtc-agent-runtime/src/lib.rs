@@ -270,14 +270,16 @@ where
                             handle_server_message(&text, &shell_manager, &preferences_store, &outbound_tx)?;
                         }
                         Message::Close(Some(frame)) => {
-                            bail!(
+                            info!(
                                 "websocket closed by server (code {}, reason `{}`)",
                                 frame.code,
                                 frame.reason
                             );
+                            return Ok(());
                         }
                         Message::Close(None) => {
-                            bail!("websocket closed by server");
+                            info!("websocket closed by server");
+                            return Ok(());
                         }
                         Message::Ping(payload) => {
                             write_half.send(Message::Pong(payload)).await.context("respond to ping")?;
