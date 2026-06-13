@@ -7,7 +7,9 @@ use serde::Serialize;
 
 pub const WINDOWS_SERVICE_NAME: &str = "RemoteTerminalCloudAgent";
 
+#[allow(dead_code)]
 const MACOS_SERVICE_LABEL: &str = "com.remote-terminal-cloud.agent";
+#[allow(dead_code)]
 const MACOS_PLIST_PATH: &str = "/Library/LaunchDaemons/com.remote-terminal-cloud.agent.plist";
 
 #[derive(Debug, Clone, Serialize)]
