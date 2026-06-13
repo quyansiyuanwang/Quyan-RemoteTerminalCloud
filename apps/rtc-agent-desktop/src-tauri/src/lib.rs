@@ -42,6 +42,7 @@ const MENU_OPEN_CONFIG: &str = "open-config";
 const MENU_OPEN_LOGS: &str = "open-logs";
 const MENU_QUIT: &str = "quit";
 const MAIN_WINDOW_LABEL: &str = "main";
+#[cfg(target_os = "windows")]
 const APP_RUN_REG_VALUE: &str = "RemoteTerminalCloudAgentDesktop";
 const DESKTOP_STATE_FILE_NAME: &str = "desktop-state.json";
 const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
@@ -1068,6 +1069,7 @@ fn apply_no_window(command: &mut StdCommand) {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn apply_no_window(_command: &mut StdCommand) {}
 
 fn managed_logs_dir() -> PathBuf {

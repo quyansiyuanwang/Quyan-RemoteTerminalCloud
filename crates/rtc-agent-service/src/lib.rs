@@ -1,13 +1,19 @@
+#[allow(unused_imports)]
 use std::fs;
+#[allow(unused_imports)]
 use std::path::Path;
+#[allow(unused_imports)]
 use std::process::Command;
 
+#[allow(unused_imports)]
 use anyhow::{Result, Context, anyhow, bail};
 use serde::Serialize;
 
 pub const WINDOWS_SERVICE_NAME: &str = "RemoteTerminalCloudAgent";
 
+#[allow(dead_code)]
 const MACOS_SERVICE_LABEL: &str = "com.remote-terminal-cloud.agent";
+#[allow(dead_code)]
 const MACOS_PLIST_PATH: &str = "/Library/LaunchDaemons/com.remote-terminal-cloud.agent.plist";
 
 #[derive(Debug, Clone, Serialize)]
