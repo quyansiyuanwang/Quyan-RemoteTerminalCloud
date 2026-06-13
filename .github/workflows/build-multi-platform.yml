@@ -53,17 +53,20 @@ jobs:
             target_arch: x64
             installer_glob: release/artifacts/linux-x64/*.deb
             archive_glob: release/artifacts/linux-x64/*.tar.gz
+            portable_bin: build/bin/linux-x64/rtc-agent
           - name: macos-arm64
             os: macos-14
             target_platform: darwin
             target_arch: arm64
             installer_glob: release/artifacts/darwin-arm64/*.pkg
             desktop_glob: release/artifacts/darwin-arm64/*.dmg
+            portable_bin: build/bin/darwin-arm64/rtc-agent
           - name: windows-x64
             os: windows-latest
             target_platform: win32
             target_arch: x64
             installer_glob: release/artifacts/windows-installers/tauri/nsis/*.exe
+            portable_bin: build/bin/win32-x64/rtc-agent.exe
 
     steps:
       - name: Checkout
@@ -128,6 +131,13 @@ jobs:
           path: ${{ matrix.desktop_glob }}
           if-no-files-found: error
 
+      - name: Upload portable binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-portable
+          path: ${{ matrix.portable_bin }}
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -143,9 +153,16 @@ jobs:
         with:
           path: release-assets
 
+      - name: Rename portable binaries
+        run: |
+          ver="${{ github.ref_name }}"
+          mv release-assets/linux-x64-portable/rtc-agent   release-assets/linux-x64-portable/rtc-agent-${ver}-linux-x64
+          mv release-assets/macos-arm64-portable/rtc-agent  release-assets/macos-arm64-portable/rtc-agent-${ver}-darwin-arm64
+          mv release-assets/windows-x64-portable/rtc-agent.exe release-assets/windows-x64-portable/rtc-agent-${ver}-win32-x64.exe
+
       - name: Generate SHA256 checksums
         run: |
-          find release-assets -type f \( -name '*.tar.gz' -o -name '*.exe' -o -name '*.deb' -o -name '*.pkg' -o -name '*.dmg' \) -print0 \
+          find release-assets -type f \( -name '*.tar.gz' -o -name '*.exe' -o -name '*.deb' -o -name '*.pkg' -o -name '*.dmg' -o -name 'rtc-agent-*' \) -print0 \
             | sort -z \
             | xargs -0 sha256sum > release-assets/SHA256SUMS.txt
 
@@ -163,4 +180,5 @@ jobs:
             release-assets/**/*.deb
             release-assets/**/*.pkg
             release-assets/**/*.dmg
+            release-assets/*-portable/rtc-agent-*
             release-assets/SHA256SUMS.txt
