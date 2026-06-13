@@ -30,15 +30,12 @@ jobs:
           ref: master
           token: ${{ secrets.RELEASE_PAT }}
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Bump version
         id: bump
         run: |
           version="${{ github.ref_name }}"
           version="${version#v}"
-          cargo xtask version "$version"
+          bash scripts/bump-version.sh "$version"
           echo "package_version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Commit version bump
