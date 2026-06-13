@@ -153,12 +153,12 @@ fn main() -> Result<()> {
     // calls exit() before any flush, so force unbuffered stdout here.
     #[cfg(not(windows))]
     unsafe {
-        extern "C" {
+        #[allow(non_camel_case_types)]
+        type libc_FILE = std::ffi::c_void;
+        unsafe extern "C" {
             fn setvbuf(stream: *mut libc_FILE, buf: *mut u8, mode: i32, size: usize) -> i32;
             static mut stdout: *mut libc_FILE;
         }
-        #[allow(non_camel_case_types)]
-        type libc_FILE = std::ffi::c_void;
         setvbuf(stdout, std::ptr::null_mut(), 2 /* _IONBF */, 0);
     }
 
