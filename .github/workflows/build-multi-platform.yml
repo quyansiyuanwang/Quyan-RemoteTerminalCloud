@@ -175,16 +175,15 @@ jobs:
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
         run: cargo xtask artifact
 
-      - name: Build Windows portable binary
-        if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
-        run: |
-          cargo build --release -p rtc-agentd
-          New-Item -ItemType Directory -Force build/bin/win32-x64
-          Copy-Item target/release/rtc-agentd.exe build/bin/win32-x64/rtc-agent.exe
-
       - name: Build Windows desktop bundle
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
         run: cargo xtask windows-desktop-bundle --bundles nsis
+
+      - name: Copy portable binary from release build
+        if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
+        run: |
+          New-Item -ItemType Directory -Force build/bin/win32-x64
+          Copy-Item target/release/rtc-agentd.exe build/bin/win32-x64/rtc-agent.exe
 
       - name: Build macOS desktop bundle (.app/.dmg)
         if: matrix.target_platform == 'darwin'
