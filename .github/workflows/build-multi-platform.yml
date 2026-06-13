@@ -9,41 +9,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ── Tag v*: validate version, build all platforms, publish release ──────────
-  validate-release-tag:
-    name: Validate release tag
+  # ── Tag v*: bump version files, commit back to master ──────────────────────
+  prepare-release:
+    name: Bump version
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     outputs:
-      package_version: ${{ steps.version.outputs.package_version }}
+      package_version: ${{ steps.bump.outputs.package_version }}
     steps:
-      - name: Checkout
+      - name: Checkout master
         uses: actions/checkout@v4
+        with:
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Read VERSION
-        id: version
-        run: echo "package_version=$(tr -d '\r\n' < VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Validate tag matches VERSION
+      - name: Bump version
+        id: bump
         run: |
-          expected_tag="v${{ steps.version.outputs.package_version }}"
-          actual_tag="${{ github.ref_name }}"
-          if [ "$actual_tag" != "$expected_tag" ]; then
-            echo "Tag $actual_tag does not match VERSION $expected_tag"
-            exit 1
-          fi
+          version="${{ github.ref_name }}"
+          version="${version#v}"
+          cargo xtask version "$version"
+          echo "package_version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "chore: bump version to ${{ github.ref_name }}"
+          git push
 
   build:
     name: ${{ matrix.name }}
-    needs: validate-release-tag
-    if: always() && (needs.validate-release-tag.result == 'success' || needs.validate-release-tag.result == 'skipped')
+    needs: prepare-release
+    if: always() && (needs.prepare-release.result == 'success' || needs.prepare-release.result == 'skipped')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -221,7 +230,7 @@ jobs:
     name: Publish GitHub Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs:
-      - validate-release-tag
+      - prepare-release
       - build
     runs-on: ubuntu-latest
     permissions:
