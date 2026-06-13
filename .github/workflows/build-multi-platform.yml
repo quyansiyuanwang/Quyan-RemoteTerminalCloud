@@ -129,13 +129,10 @@ jobs:
 
       - name: Setup Linux desktop build deps
         if: matrix.target_platform == 'linux' && matrix.cross == false
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          version: 1.0
 
       - name: Install desktop frontend dependencies
         if: (matrix.installer_glob != '' || matrix.desktop_glob != '') && matrix.cross == false
@@ -183,14 +180,15 @@ jobs:
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
         run: cargo xtask windows-desktop-bundle --bundles nsis
 
-      - name: Copy portable binary from release build
+      - name: Build portable binary (Windows x64)
         if: matrix.target_platform == 'win32' && matrix.target_arch == 'x64'
         run: |
+          cargo build --release -p rtc-agentd
           New-Item -ItemType Directory -Force build/bin/win32-x64
           Copy-Item target/release/rtc-agentd.exe build/bin/win32-x64/rtc-agent.exe
 
       - name: Build macOS desktop bundle (.app/.dmg)
-        if: matrix.target_platform == 'darwin'
+        if: matrix.target_platform == 'darwin' && matrix.desktop_glob != ''
         env:
           RTC_TARGET_PLATFORM: ${{ matrix.target_platform }}
           RTC_TARGET_ARCH: ${{ matrix.target_arch }}
