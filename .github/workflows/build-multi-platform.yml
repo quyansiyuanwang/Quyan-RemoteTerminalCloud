@@ -109,6 +109,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: master
 
       - name: Setup Node
         if: matrix.installer_glob != '' || matrix.desktop_glob != ''
