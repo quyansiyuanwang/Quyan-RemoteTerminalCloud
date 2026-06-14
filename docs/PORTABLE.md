@@ -50,9 +50,12 @@ $env:RTC_REGISTRATION_TOKEN = "your-token"
 ## 常用命令
 
 ```bash
-rtc-agent                    # 默认：启动 agent 持续运行
-rtc-agent run                # 同上，显式持续运行
+rtc-agent                    # 默认：启动 agent 持续运行（前台）
+rtc-agent run                # 同上，显式前台持续运行
 rtc-agent once               # 运行一次后退出
+rtc-agent start              # 后台无窗口运行（类服务模式，写 PID 文件）
+rtc-agent stop               # 停止后台运行的 agent
+rtc-agent install-path       # 将当前 rtc-agent 所在目录注册到系统 PATH
 rtc-agent configure          # 交互式配置向导（保存 token 到配置文件）
 rtc-agent status --json      # 查看当前状态
 rtc-agent version --json     # 查看版本信息
@@ -116,7 +119,35 @@ RTC_CONFIG_FILE=/etc/rtc-agent/config.json ./rtc-agent run
 ./rtc-agent configure
 ```
 
-## 作为系统服务运行
+## 后台运行（类服务模式）
+
+便携版内置后台运行支持，无需依赖系统服务管理器：
+
+```bash
+# 启动后台运行（无黑窗/无控制台输出）
+rtc-agent start
+
+# 停止后台运行
+rtc-agent stop
+```
+
+- PID 文件写入配置目录（`rtc-agent.pid`），重复调用 `start` 会检测是否已在运行。
+- Windows：进程以 `CREATE_NO_WINDOW | DETACHED_PROCESS` 标志启动，不会出现黑色控制台窗口。
+- Linux / macOS：标准输出/错误重定向到日志目录下的 `rtc-agent.log`。
+
+## 注册 PATH（方便全局调用 rtc-agent）
+
+```bash
+# Windows（写入 HKCU\Environment\Path，无需管理员权限）
+rtc-agent install-path
+
+# macOS / Linux（追加 export PATH 到 ~/.zshrc, ~/.bashrc, ~/.profile）
+./rtc-agent install-path
+```
+
+注册后打开新终端即可直接使用 `rtc-agent start`、`rtc-agent stop` 等命令，无需输入完整路径。
+
+
 
 便携版本身不负责服务注册，但可以配合系统工具实现开机自启：
 
