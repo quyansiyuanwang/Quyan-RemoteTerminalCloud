@@ -920,15 +920,16 @@ fn run_stop() -> Result<()> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        // SIGTERM
-        let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-        if ret != 0 {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::ESRCH) {
+        let status = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(_) => {
+                // process may already be gone
                 println!("[remote-terminal-cloud-agent] process {pid} not found, cleaning up pid file");
-            } else {
-                bail!("kill({pid}, SIGTERM) failed: {err}");
             }
+            Err(e) => bail!("kill failed: {e}"),
         }
     }
 
@@ -950,7 +951,11 @@ fn process_is_running(pid: u32) -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 }
 
