@@ -850,6 +850,10 @@ fn pid_file_path() -> PathBuf {
 
 fn run_start() -> Result<()> {
     let pid_path = pid_file_path();
+    // Ensure the config directory exists before writing the pid file.
+    if let Some(parent) = pid_path.parent() {
+        std::fs::create_dir_all(parent).context("create config dir")?;
+    }
     // Check if already running
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         let pid: u32 = pid_str.trim().parse().unwrap_or(0);
