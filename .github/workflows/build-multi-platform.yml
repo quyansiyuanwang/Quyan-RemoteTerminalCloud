@@ -259,6 +259,7 @@ jobs:
     needs:
       - prepare-release
       - build
+      - publish-release
     runs-on: ubuntu-latest
     steps:
       - name: Delete failed tag
