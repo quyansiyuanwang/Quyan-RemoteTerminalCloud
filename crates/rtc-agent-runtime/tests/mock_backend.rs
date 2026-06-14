@@ -262,7 +262,7 @@ fn sample_snapshot() -> HostSnapshot {
         "hostname": "mock-host",
         "platform": "windows",
         "arch": "x86_64",
-        "agentVersion": "0.5.2",
+        "agentVersion": "0.5.3",
         "capabilities": {
             "sshForward": true,
             "nativePty": true,
