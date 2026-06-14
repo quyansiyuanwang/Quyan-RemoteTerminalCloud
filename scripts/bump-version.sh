@@ -19,4 +19,7 @@ sed_inplace "!define AGENT_VERSION \"$OLD\"" "!define AGENT_VERSION \"$NEW\"" pa
 sed_inplace "\"version\": \"$OLD\""        "\"version\": \"$NEW\""        apps/rtc-agent-desktop/public/mock/status.json
 sed_inplace "\"agentVersion\": \"$OLD\""   "\"agentVersion\": \"$NEW\""   crates/rtc-agent-runtime/tests/mock_backend.rs
 
+# Sync Cargo.lock so it reflects the new workspace version and can be committed
+cargo update --workspace
+
 echo "Bumped $OLD -> $NEW"
