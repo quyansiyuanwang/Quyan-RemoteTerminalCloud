@@ -29,6 +29,34 @@ jobs:
         with:
           ref: master
           token: ${{ secrets.RELEASE_PAT }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Validate version increment
+        run: |
+          new="${{ github.ref_name }}"
+          new="${new#v}"
+          IFS='.' read -r maj min pat <<< "$new"
+          # Find the latest existing v* tag (excluding the current one)
+          prev=$(git tag --sort=-version:refname | grep '^v' | grep -v "^v${new}$" | head -1)
+          if [ -z "$prev" ]; then
+            echo "No previous tag found, skipping increment check."
+            exit 0
+          fi
+          prev="${prev#v}"
+          IFS='.' read -r pmaj pmin ppat <<< "$prev"
+          ok=false
+          # major bump: x+1.0.0
+          if [ "$maj" -eq "$((pmaj + 1))" ] && [ "$min" -eq 0 ] && [ "$pat" -eq 0 ]; then ok=true; fi
+          # minor bump: same major, y+1.0
+          if [ "$maj" -eq "$pmaj" ] && [ "$min" -eq "$((pmin + 1))" ] && [ "$pat" -eq 0 ]; then ok=true; fi
+          # patch bump: same major.minor, z+1
+          if [ "$maj" -eq "$pmaj" ] && [ "$min" -eq "$pmin" ] && [ "$pat" -eq "$((ppat + 1))" ]; then ok=true; fi
+          if [ "$ok" = false ]; then
+            echo "ERROR: v${new} is not a valid single increment from v${prev}."
+            exit 1
+          fi
+          echo "Version v${new} is a valid increment from v${prev}."
 
       - name: Bump version
         id: bump
@@ -225,6 +253,19 @@ jobs:
           path: ${{ matrix.portable_bin }}
           if-no-files-found: error
 
+  cleanup-on-failure:
+    name: Delete tag on build failure
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && failure()
+    needs:
+      - prepare-release
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete failed tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: gh api -X DELETE "/repos/${{ github.repository }}/git/refs/tags/${{ github.ref_name }}"
+
   publish-release:
     name: Publish GitHub Release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -235,6 +276,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout (for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - name: Download workflow artifacts
         uses: actions/download-artifact@v4
         with:
@@ -274,3 +321,15 @@ jobs:
             release-assets/**/*.dmg
             release-assets/*-portable/rtc-agent-*
             release-assets/SHA256SUMS.txt
+
+      - name: Update version JSON endpoint
+        env:
+          JSON_ENDPOINT_ID: ${{ secrets.RTC_VERSION_JSON_ENDPOINT_ID }}
+          JSON_ENDPOINT_TOKEN: ${{ secrets.RTC_VERSION_JSON_ENDPOINT_TOKEN }}
+        run: |
+          versions=$(git tag --sort=-version:refname | grep '^v' | jq -R . | jq -sc .)
+          curl -fsSL -X PUT \
+            -H "Authorization: Bearer $JSON_ENDPOINT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"RemoteTerminalCloudVersionPoint\",\"jsonContent\":$versions,\"isPublic\":true}" \
+            "https://api.qysyw.cn/json-endpoints/$JSON_ENDPOINT_ID"
