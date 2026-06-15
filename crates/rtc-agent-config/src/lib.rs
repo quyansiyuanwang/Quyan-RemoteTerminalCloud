@@ -234,6 +234,45 @@ pub fn has_registration_token_env_override() -> bool {
     normalize_template_string(env::var("RTC_REGISTRATION_TOKEN").ok()).is_some()
 }
 
+// ── Agent runtime state (persisted across restarts) ──
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentState {
+    pub device_id: String,
+    pub heartbeat_token: String,
+    pub heartbeat_interval_seconds: i32,
+    pub websocket_url: String,
+}
+
+/// Derives the state file path from the config file path (sibling `state.json`).
+pub fn state_file_path(config_file_path: &Path) -> PathBuf {
+    config_file_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("state.json")
+}
+
+pub fn load_agent_state(config_file_path: &Path) -> Option<AgentState> {
+    let path = state_file_path(config_file_path);
+    let content = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+pub fn save_agent_state(config_file_path: &Path, state: &AgentState) -> Result<()> {
+    let path = state_file_path(config_file_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let payload = serde_json::to_string_pretty(state)?;
+    fs::write(&path, payload).with_context(|| format!("write {}", path.display()))
+}
+
+pub fn clear_agent_state(config_file_path: &Path) {
+    let path = state_file_path(config_file_path);
+    let _ = fs::remove_file(path);
+}
+
 pub fn normalize_template_string(value: Option<String>) -> Option<String> {
     let value = value?.trim().to_owned();
     match value.as_str() {

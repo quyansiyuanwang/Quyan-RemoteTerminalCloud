@@ -7,7 +7,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 use rtc_agent_config::{
     RuntimeConfig, default_config_file_path, default_preferences_file_path,
     default_server_base_url, has_registration_token_env_override, persist_registration_token,
-    read_runtime_config,
+    read_runtime_config, load_agent_state, save_agent_state, clear_agent_state, AgentState,
 };
 use rtc_agent_platform::{
     ManagerPaths, collect_host_snapshot, detect_available_shells, resolve_default_shell,
@@ -15,7 +15,7 @@ use rtc_agent_platform::{
 use rtc_agent_preferences::PreferencesStore;
 use rtc_agent_protocol::ShellType;
 use rtc_agent_runtime::{
-    ApiClient, ApiErrorDetails, ApiErrorKind, describe_error, run_agent_tunnel,
+    ApiClient, ApiErrorDetails, ApiErrorKind, RegisteredAgentSession, describe_error, run_agent_tunnel,
 };
 use rtc_agent_service as service;
 use serde::Serialize;
@@ -695,17 +695,42 @@ async fn run_agent_once() -> Result<()> {
     };
 
     let api_client = ApiClient::default();
-    let session = match api_client
-        .register_agent(&config.server_base_url, &registration_token, snapshot)
-        .await
-    {
-        Ok(session) => session,
-        Err(err) => {
-            print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
-            return Err(err);
+
+    // Try to resume from persisted state (avoids re-using the registration token on reconnect).
+    let session = if let Some(saved) = load_agent_state(&config.config_file_path) {
+        println!(
+            "[remote-terminal-cloud-agent] resuming persisted session for device {}",
+            saved.device_id
+        );
+        RegisteredAgentSession {
+            device_id: saved.device_id,
+            heartbeat_token: saved.heartbeat_token,
+            heartbeat_interval_seconds: saved.heartbeat_interval_seconds,
+            websocket_url: saved.websocket_url,
         }
+    } else {
+        let session = match api_client
+            .register_agent(&config.server_base_url, &registration_token, snapshot)
+            .await
+        {
+            Ok(session) => session,
+            Err(err) => {
+                print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
+                return Err(err);
+            }
+        };
+        println!("[remote-terminal-cloud-agent] registered device {}", session.device_id);
+        let state = AgentState {
+            device_id: session.device_id.clone(),
+            heartbeat_token: session.heartbeat_token.clone(),
+            heartbeat_interval_seconds: session.heartbeat_interval_seconds,
+            websocket_url: session.websocket_url.clone(),
+        };
+        if let Err(err) = save_agent_state(&config.config_file_path, &state) {
+            eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
+        }
+        session
     };
-    println!("[remote-terminal-cloud-agent] registered device {}", session.device_id);
 
     if !config.run_heartbeat && !config.run_tunnel {
         println!(
@@ -722,6 +747,7 @@ async fn run_agent_once() -> Result<()> {
         let server_base_url = config.server_base_url.clone();
         let enabled_shell_types = config.enabled_shell_types.clone();
         let logs_dir = logs_dir.clone();
+        let config_file_path = config.config_file_path.clone();
         let mut heartbeat_session = session.clone();
         tasks.spawn(async move {
             loop {
@@ -740,8 +766,17 @@ async fn run_agent_once() -> Result<()> {
                     .await
                     .map_err(|err| {
                         print_runtime_error("[remote-terminal-cloud-agent] heartbeat failed", &err);
+                        // Clear state so the next retry triggers a fresh registration.
+                        clear_agent_state(&config_file_path);
                         err
                     })?;
+                // Persist updated heartbeat state (interval / websocket_url may change).
+                let _ = save_agent_state(&config_file_path, &AgentState {
+                    device_id: heartbeat_session.device_id.clone(),
+                    heartbeat_token: heartbeat_session.heartbeat_token.clone(),
+                    heartbeat_interval_seconds: heartbeat_session.heartbeat_interval_seconds,
+                    websocket_url: heartbeat_session.websocket_url.clone(),
+                });
                 println!(
                     "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
                     heartbeat_session.device_id, heartbeat_session.heartbeat_interval_seconds
@@ -768,12 +803,16 @@ async fn run_agent_once() -> Result<()> {
         println!("[remote-terminal-cloud-agent] tunnel disabled by RTC_DISABLE_TUNNEL=1");
     }
 
-    match tasks.join_next().await {
-        Some(result) => result??,
+    let task_result = match tasks.join_next().await {
+        Some(result) => result?,
         None => bail!("agent runtime exited without active tasks"),
+    };
+    // A task failure (e.g. invalid heartbeat token after server restart) should
+    // clear persisted state so the next loop re-registers from scratch.
+    if task_result.is_err() {
+        clear_agent_state(&config.config_file_path);
     }
-
-    Ok(())
+    task_result
 }
 
 fn is_interactive_input_available() -> bool {
