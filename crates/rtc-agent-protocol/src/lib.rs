@@ -77,6 +77,8 @@ pub struct HostSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRegistrationRequest {
     pub registration_token: String,
+    pub device_fingerprint: String,
+    pub fingerprint_version: String,
     pub snapshot: HostSnapshot,
 }
 

@@ -21,13 +21,16 @@ The agent server address is built into release binaries as `https://api.qysyw.cn
 
 Windows service mode is no longer the default packaging path.
 
+- `rtc-agentd.exe service-host` is the native Windows Service entrypoint used by `rtc-agent-installer` and `rtc-agentd service install`
 - `RemoteTerminalCloudAgentService.xml` remains only as legacy compatibility material
 - the default package does not include a service wrapper
+- compatibility `start` / `stop` commands now prefer the registered Windows Service and only fall back when service control is unavailable
 
 ## Files
 
 - `apps/rtc-agent-desktop/` — Tauri desktop manager
 - `apps/rtc-agent-installer/` — Rust Windows install/admin helper
+- `apps/rtc-agentd/` — background runtime and native Windows service host
 - `bin/rtc-agent-installer.exe` — native Windows install/admin helper used by NSIS and shortcuts
 - `RemoteTerminalCloudAgentService.xml` — optional WinSW service definition for compatibility mode
 - `nsis/agent.nsi` — NSIS authoring for desktop-first EXE installer

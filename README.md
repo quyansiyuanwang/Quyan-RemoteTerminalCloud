@@ -103,6 +103,19 @@ cargo xtask artifact
 cargo xtask package
 ```
 
+可通过环境开关切换本地开发/生产打包：
+
+```bash
+cargo xtask --dev build
+cargo xtask --dev package
+cargo xtask --prod package
+```
+
+- `--prod` 为默认值，优先使用 `.env.production`，未配置时回退到发布地址
+- `--dev` 优先使用 `.env.development`，未配置时回退到 `http://localhost:10001`
+- `.env.development` / `.env.production` 中可使用 `RTC_AGENT_SERVER_BASE_URL` 或 `RTC_SERVER_BASE_URL`
+- 可直接参考 `.env.development.example:1` 与 `.env.production.example:1` 复制生成本地环境文件
+
 版本切换也可以直接走统一命令：
 
 ```bash
@@ -234,8 +247,8 @@ release/artifacts/<platform>-<arch>/
 cargo xtask package
 ```
 
-这条链现在会强制使用生产环境后端 `https://api.qysyw.cn`，并在构建后做一次产物自检。
-本机 `.env`、`RTC_SERVER_BASE_URL`、`RTC_REGISTRATION_TOKEN` 等开发环境变量不会再污染正式打包结果。
+这条链默认会使用生产环境后端 `https://api.qysyw.cn`，并在构建后做一次产物自检。
+如需本地联调打包，可改用 `cargo xtask --dev package`，它会读取 `.env.development`，并允许本地 `RTC_*` 配置参与打包与运行时默认值。
 
 默认产物会落在：
 

@@ -102,6 +102,8 @@ impl ApiClient {
         &self,
         server_base_url: &str,
         registration_token: &str,
+        device_fingerprint: &str,
+        fingerprint_version: &str,
         snapshot: HostSnapshot,
     ) -> Result<RegisteredAgentSession> {
         let url =
@@ -111,6 +113,8 @@ impl ApiClient {
             .post(url)
             .json(&AgentRegistrationRequest {
                 registration_token: registration_token.to_owned(),
+                device_fingerprint: device_fingerprint.to_owned(),
+                fingerprint_version: fingerprint_version.to_owned(),
                 snapshot,
             })
             .send()

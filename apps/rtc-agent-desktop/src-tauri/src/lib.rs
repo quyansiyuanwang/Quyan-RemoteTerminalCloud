@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result, anyhow, bail};
 use rtc_agent_config::{
     RuntimeConfig, default_config_file_path, default_server_base_url,
-    has_registration_token_env_override, normalize_template_string, persist_registration_token,
-    read_config_file, read_runtime_config,
+    has_registration_token_env_override, load_or_collect_device_fingerprint,
+    normalize_template_string, persist_registration_token, read_config_file,
+    read_runtime_config,
 };
 use rtc_agent_platform::{
     collect_host_snapshot, resolve_default_shell,
@@ -688,8 +689,15 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
     };
 
     let api_client = ApiClient::default();
+    let device_fingerprint = load_or_collect_device_fingerprint(&config.config_file_path)?;
     let session = match api_client
-        .register_agent(&config.server_base_url, &registration_token, snapshot)
+        .register_agent(
+            &config.server_base_url,
+            &registration_token,
+            &device_fingerprint.device_fingerprint,
+            &device_fingerprint.fingerprint_version,
+            snapshot,
+        )
         .await
     {
         Ok(session) => session,
@@ -713,7 +721,11 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         app,
         state.as_ref(),
         "stdout",
-        format!("[remote-terminal-cloud-agent] registered device {}", session.device_id),
+        format!(
+            "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
+            session.device_id,
+            &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
+        ),
     );
     update_runtime_snapshot(&state, |runtime| {
         runtime.phase = DesktopRuntimePhase::Online;

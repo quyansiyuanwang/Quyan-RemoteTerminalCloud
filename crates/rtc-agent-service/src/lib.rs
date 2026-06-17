@@ -7,6 +7,8 @@ use std::process::Command;
 
 #[allow(unused_imports)]
 use anyhow::{Result, Context, anyhow, bail};
+#[allow(unused_imports)]
+use rtc_agent_config::{default_config_file_path, persist_registration_token};
 use serde::Serialize;
 
 pub const WINDOWS_SERVICE_NAME: &str = "RemoteTerminalCloudAgent";
@@ -15,6 +17,8 @@ pub const WINDOWS_SERVICE_NAME: &str = "RemoteTerminalCloudAgent";
 const MACOS_SERVICE_LABEL: &str = "com.remote-terminal-cloud.agent";
 #[allow(dead_code)]
 const MACOS_PLIST_PATH: &str = "/Library/LaunchDaemons/com.remote-terminal-cloud.agent.plist";
+#[allow(dead_code)]
+const LINUX_SYSTEMD_SERVICE_NAME: &str = "remote-terminal-cloud-agent.service";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,13 +37,9 @@ pub fn service_status() -> ServiceActionResult {
     {
         macos_service_status()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        ServiceActionResult {
-            action: "status".into(),
-            ok: true,
-            message: "Service management is not yet implemented for this platform.".into(),
-        }
+        linux_service_status()
     }
 }
 
@@ -52,14 +52,9 @@ pub fn install_service(install_root: &str, _token: Option<&str>) -> Result<Servi
     {
         macos_install_service(install_root)
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        let _ = install_root;
-        Ok(ServiceActionResult {
-            action: "install".into(),
-            ok: true,
-            message: "Service install is not yet implemented for this platform.".into(),
-        })
+        linux_install_service(install_root)
     }
 }
 
@@ -72,13 +67,9 @@ pub fn uninstall_service(_install_root: &str) -> Result<ServiceActionResult> {
     {
         macos_uninstall_service()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        Ok(ServiceActionResult {
-            action: "uninstall".into(),
-            ok: true,
-            message: "Service uninstall is not yet implemented for this platform.".into(),
-        })
+        linux_uninstall_service(_install_root)
     }
 }
 
@@ -91,13 +82,9 @@ pub fn start_service() -> Result<ServiceActionResult> {
     {
         macos_start_service()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        Ok(ServiceActionResult {
-            action: "start".into(),
-            ok: true,
-            message: "Service start is not yet implemented for this platform.".into(),
-        })
+        linux_start_service()
     }
 }
 
@@ -110,13 +97,9 @@ pub fn stop_service(_install_root: &str) -> Result<ServiceActionResult> {
     {
         macos_stop_service()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        Ok(ServiceActionResult {
-            action: "stop".into(),
-            ok: true,
-            message: "Service stop is not yet implemented for this platform.".into(),
-        })
+        linux_stop_service(_install_root)
     }
 }
 
@@ -129,14 +112,140 @@ pub fn restart_service(_install_root: &str) -> Result<ServiceActionResult> {
     {
         macos_restart_service()
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        Ok(ServiceActionResult {
-            action: "restart".into(),
-            ok: true,
-            message: "Service restart is not yet implemented for this platform.".into(),
-        })
+        linux_restart_service(_install_root)
     }
+}
+
+// ── Linux systemd ──
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_service_status() -> ServiceActionResult {
+    if !command_exists("systemctl") {
+        return ServiceActionResult {
+            action: "status".into(),
+            ok: false,
+            message: "systemctl is not available on this host.".into(),
+        };
+    }
+
+    match Command::new("systemctl")
+        .args(["status", LINUX_SYSTEMD_SERVICE_NAME, "--no-pager", "--full"])
+        .output()
+    {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let text = if !stdout.trim().is_empty() { stdout } else { stderr };
+            ServiceActionResult {
+                action: "status".into(),
+                ok: out.status.success(),
+                message: text.trim().to_owned(),
+            }
+        }
+        Err(err) => ServiceActionResult {
+            action: "status".into(),
+            ok: false,
+            message: format!("failed to query systemd service: {err}"),
+        },
+    }
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_install_service(install_root: &str) -> Result<ServiceActionResult> {
+    if !command_exists("systemctl") {
+        bail!("systemctl is required to install the Linux service");
+    }
+    let root = install_root.trim();
+    if root.is_empty() {
+        bail!("linux service install requires an install_root");
+    }
+
+    let status = Command::new("systemctl")
+        .args(["daemon-reload"])
+        .status()
+        .context("failed to reload systemd")?;
+    if !status.success() {
+        bail!("systemctl daemon-reload failed");
+    }
+
+    let status = Command::new("systemctl")
+        .args(["enable", "--now", LINUX_SYSTEMD_SERVICE_NAME])
+        .status()
+        .context("failed to enable Linux service")?;
+    if !status.success() {
+        bail!("systemctl enable --now failed for {}", LINUX_SYSTEMD_SERVICE_NAME);
+    }
+
+    Ok(ServiceActionResult {
+        action: "install".into(),
+        ok: true,
+        message: format!(
+            "systemd service '{}' enabled and started for install root {}",
+            LINUX_SYSTEMD_SERVICE_NAME, root
+        ),
+    })
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_uninstall_service(_install_root: &str) -> Result<ServiceActionResult> {
+    if !command_exists("systemctl") {
+        bail!("systemctl is required to uninstall the Linux service");
+    }
+
+    Command::new("systemctl")
+        .args(["disable", "--now", LINUX_SYSTEMD_SERVICE_NAME])
+        .status()
+        .ok();
+
+    Ok(ServiceActionResult {
+        action: "uninstall".into(),
+        ok: true,
+        message: format!("systemd service '{}' disabled", LINUX_SYSTEMD_SERVICE_NAME),
+    })
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_start_service() -> Result<ServiceActionResult> {
+    run_linux_systemctl("start", &["start", LINUX_SYSTEMD_SERVICE_NAME])
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_stop_service(_install_root: &str) -> Result<ServiceActionResult> {
+    run_linux_systemctl("stop", &["stop", LINUX_SYSTEMD_SERVICE_NAME])
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn linux_restart_service(_install_root: &str) -> Result<ServiceActionResult> {
+    run_linux_systemctl("restart", &["restart", LINUX_SYSTEMD_SERVICE_NAME])
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+fn run_linux_systemctl(action: &str, args: &[&str]) -> Result<ServiceActionResult> {
+    if !command_exists("systemctl") {
+        bail!("systemctl is not available on this host");
+    }
+    let status = Command::new("systemctl")
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to {action} Linux service"))?;
+    if !status.success() {
+        bail!("systemctl {} failed", args.join(" "));
+    }
+    Ok(ServiceActionResult {
+        action: action.into(),
+        ok: true,
+        message: format!("systemd service '{}' {}ed", LINUX_SYSTEMD_SERVICE_NAME, action),
+    })
+}
+
+#[allow(dead_code)]
+fn command_exists(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .output()
+        .is_ok()
 }
 
 // ── macOS launchd ──
@@ -329,7 +438,7 @@ fn windows_service_status() -> ServiceActionResult {
             let text = if !stdout.is_empty() { stdout } else { stderr };
             ServiceActionResult {
                 action: "status".into(),
-                ok: true,
+                ok: out.status.success(),
                 message: text.to_string(),
             }
         }
@@ -343,9 +452,14 @@ fn windows_service_status() -> ServiceActionResult {
 
 #[cfg(target_os = "windows")]
 fn windows_install_service(install_root: &str, token: Option<&str>) -> Result<ServiceActionResult> {
+    let root = install_root.trim();
+    if root.is_empty() {
+        bail!("windows service install requires an install_root");
+    }
+
     let bin_path = format!(
-        r#""{}" --service"#,
-        Path::new(install_root).join("rtc-agentd.exe").display()
+        r#""{}" service-host"#,
+        Path::new(root).join("rtc-agentd.exe").display()
     );
     let status = Command::new("sc")
         .args([
@@ -366,6 +480,7 @@ fn windows_install_service(install_root: &str, token: Option<&str>) -> Result<Se
     if let Some(token) = token {
         let token_trimmed = token.trim();
         if !token_trimmed.is_empty() {
+            persist_registration_token(&default_config_file_path(), token_trimmed)?;
             Command::new("sc")
                 .args([
                     "config",
@@ -384,7 +499,7 @@ fn windows_install_service(install_root: &str, token: Option<&str>) -> Result<Se
     Ok(ServiceActionResult {
         action: "install".into(),
         ok: true,
-        message: format!("service '{WINDOWS_SERVICE_NAME}' installed and started"),
+        message: format!("service '{WINDOWS_SERVICE_NAME}' installed and started from {root}"),
     })
 }
 

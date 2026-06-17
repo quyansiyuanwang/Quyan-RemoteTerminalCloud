@@ -4,12 +4,16 @@ use std::process::{Command as ProcessCommand, Stdio};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
-use rtc_agent_packaging::{PackagingCommand, resolve_context, run_packaging_command};
+use rtc_agent_packaging::{BuildProfile, PackagingCommand, resolve_context_for_profile, run_packaging_command_for_profile};
 use serde_json::Value;
 
 #[derive(Parser)]
 #[command(name = "cargo xtask")]
 struct Cli {
+    #[arg(long, global = true, conflicts_with = "prod")]
+    dev: bool,
+    #[arg(long, global = true, conflicts_with = "dev")]
+    prod: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -41,7 +45,14 @@ struct VersionArgs {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let ctx = resolve_context()?;
+    let build_profile = if cli.dev {
+        BuildProfile::Dev
+    } else if cli.prod {
+        BuildProfile::Prod
+    } else {
+        BuildProfile::Prod
+    };
+    let ctx = resolve_context_for_profile(build_profile)?;
 
     let result = match cli.command {
         Command::Build => PackagingCommand::Build,
@@ -60,7 +71,7 @@ fn main() -> Result<()> {
         },
     };
 
-    let result = run_packaging_command(result)?;
+    let result = run_packaging_command_for_profile(result, build_profile)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

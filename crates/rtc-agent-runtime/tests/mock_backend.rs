@@ -46,8 +46,9 @@ async fn runtime_can_register_heartbeat_and_sync_preferences_over_websocket() ->
         Client::builder().timeout(std::time::Duration::from_secs(15)).no_proxy().build()?,
     );
 
-    let session =
-        api_client.register_agent(&server_base_url, "demo-token", sample_snapshot()).await?;
+    let session = api_client
+        .register_agent(&server_base_url, "demo-token", "abcd1234", "v1", sample_snapshot())
+        .await?;
     assert_eq!(session.device_id, "device-123");
     assert_eq!(session.heartbeat_interval_seconds, 1);
 
@@ -158,7 +159,9 @@ async fn handle_http_connection(
 
     let (status_line, payload) = if request_line.starts_with("POST /remote-terminal/agent/register")
     {
-        let _: AgentRegistrationRequest = serde_json::from_slice(&body)?;
+        let request: AgentRegistrationRequest = serde_json::from_slice(&body)?;
+        assert_eq!(request.device_fingerprint, "abcd1234");
+        assert_eq!(request.fingerprint_version, "v1");
         (
             "HTTP/1.1 200 OK",
             serde_json::to_vec(&AgentRegistrationResponse {

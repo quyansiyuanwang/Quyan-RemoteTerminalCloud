@@ -9,6 +9,7 @@ The repository now includes:
 - config-file based runtime configuration
 - Windows desktop-first NSIS installer authoring
 - Windows packaging helpers that assemble the desktop app and sidecars
+- native Windows Service hosting in `rtc-agentd`
 - Linux `systemd` unit, install/uninstall scripts, and `deb` packaging builder
 - macOS `launchd` plist, install/uninstall scripts, and `pkg` packaging builder
 - a Rust release-bundle builder that assembles `bin/`, Rust source snapshots, and `packaging/`
@@ -48,6 +49,12 @@ Default Windows staging is desktop-first:
 - bundles `rtc-agent-desktop.exe` as the main app
 - initializes onboarding through the desktop UI after install
 - does not require WinSW/service payloads in the default package
+
+Optional managed-service flows:
+
+- Linux service commands route to the packaged `remote-terminal-cloud-agent.service` via `systemctl`
+- Windows service install uses the native `rtc-agentd.exe service-host` entrypoint
+- compatibility `rtc-agentd start` / `rtc-agentd stop` commands prefer the platform service manager before falling back to legacy PID behavior
 
 ## CI artifacts
 
@@ -103,7 +110,7 @@ Override config path with:
 
 ## Recommended next steps
 
-1. implement native Rust service backends beyond current compatibility scaffolding
+1. harden Windows service install/update flow and remove remaining legacy wrapper references
 2. add macOS signing and notarization pipeline
 3. add release publishing provenance
 4. extend Linux packaging from `deb` to `rpm`

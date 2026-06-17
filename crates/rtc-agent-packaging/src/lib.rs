@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use rtc_agent_config::RELEASE_SERVER_BASE_URL;
+use rtc_agent_config::{LOCAL_SERVER_BASE_URL, RELEASE_SERVER_BASE_URL};
 use serde_json::Value;
 use serde::Serialize;
 use tar::Builder as TarBuilder;
@@ -34,6 +34,7 @@ pub struct PackagingActionResult {
 pub struct PackagingContext {
     pub project_root: PathBuf,
     pub version: String,
+    pub build_profile: BuildProfile,
     pub target_platform: String,
     pub target_arch: String,
     pub os_name: String,
@@ -43,6 +44,41 @@ pub struct PackagingContext {
     pub platform_out_root: PathBuf,
     pub stage_root: PathBuf,
     pub archive_base_name: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BuildProfile {
+    Dev,
+    Prod,
+}
+
+impl BuildProfile {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "dev" | "development" => Ok(Self::Dev),
+            "prod" | "production" | "release" => Ok(Self::Prod),
+            other => bail!("unsupported build profile `{other}`; expected dev or prod"),
+        }
+    }
+
+    fn dotenv_file_name(self) -> &'static str {
+        match self {
+            Self::Dev => ".env.development",
+            Self::Prod => ".env.production",
+        }
+    }
+
+    fn fallback_server_base_url(self) -> &'static str {
+        match self {
+            Self::Dev => LOCAL_SERVER_BASE_URL,
+            Self::Prod => RELEASE_SERVER_BASE_URL,
+        }
+    }
+
+    fn allows_runtime_overrides(self) -> bool {
+        matches!(self, Self::Dev)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +95,10 @@ pub enum PackagingCommand {
 }
 
 pub fn resolve_context() -> Result<PackagingContext> {
+    resolve_context_for_profile(BuildProfile::Prod)
+}
+
+pub fn resolve_context_for_profile(build_profile: BuildProfile) -> Result<PackagingContext> {
     let project_root = repo_root()?;
     let version = read_version(&project_root)?;
 
@@ -85,6 +125,7 @@ pub fn resolve_context() -> Result<PackagingContext> {
     Ok(PackagingContext {
         project_root,
         version,
+        build_profile,
         target_platform,
         target_arch,
         os_name,
@@ -98,7 +139,14 @@ pub fn resolve_context() -> Result<PackagingContext> {
 }
 
 pub fn run_packaging_command(command: PackagingCommand) -> Result<PackagingActionResult> {
-    let ctx = resolve_context()?;
+    run_packaging_command_for_profile(command, BuildProfile::Prod)
+}
+
+pub fn run_packaging_command_for_profile(
+    command: PackagingCommand,
+    build_profile: BuildProfile,
+) -> Result<PackagingActionResult> {
+    let ctx = resolve_context_for_profile(build_profile)?;
     match command {
         PackagingCommand::Build => build_command(&ctx),
         PackagingCommand::Bundle => bundle_command(&ctx),
@@ -189,7 +237,7 @@ fn bundle_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
 }
 
 fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
-    if !ctx.bundle_root.exists() {
+    if !bundle_is_complete(ctx) {
         bundle_command(ctx)?;
     }
 
@@ -207,6 +255,7 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         serde_json::json!({
             "generatedAt": now_rfc3339()?,
             "version": ctx.version,
+            "buildProfile": ctx.build_profile,
             "targetPlatform": ctx.target_platform,
             "targetArch": ctx.target_arch,
             "archiveFile": archive_file_name(ctx),
@@ -222,9 +271,10 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         "Remote Terminal Cloud Agent platform artifact",
         "",
         &format!("Version: {}", ctx.version),
+        &format!("Build profile: {:?}", ctx.build_profile).to_lowercase(),
         &format!("Platform: {}", ctx.target_platform),
         &format!("Architecture: {}", ctx.target_arch),
-        &format!("Server base URL: {RELEASE_SERVER_BASE_URL}"),
+        &format!("Server base URL: {}", compiled_server_base_url(ctx)),
         "",
         "This artifact contains:",
         "- bin/ Rust agent, installer, desktop, and compatibility manager binaries",
@@ -245,6 +295,25 @@ fn artifact_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         ctx.platform_out_root.join(archive_file_name(ctx)).display().to_string(),
     );
     Ok(success("artifact", "Rust platform artifact assembled.", details))
+}
+
+fn bundle_is_complete(ctx: &PackagingContext) -> bool {
+    if !ctx.bundle_root.is_dir() {
+        return false;
+    }
+
+    if !ctx.bundle_root.join("bundle.json").is_file() {
+        return false;
+    }
+
+    let bin_dir = ctx.bundle_root.join("bin");
+    [
+        binary_file_name(ctx, "rtc-agent"),
+        binary_file_name(ctx, "rtc-agent-desktop"),
+        binary_file_name(ctx, "rtc-agent-installer"),
+    ]
+    .into_iter()
+    .all(|name| bin_dir.join(name).is_file())
 }
 
 fn package_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
@@ -308,7 +377,7 @@ fn darwin_desktop_bundle_command(ctx: &PackagingContext) -> Result<BTreeMap<Stri
         .arg("build")
         .arg("--bundles")
         .arg("dmg")
-        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
+        .env("RTC_AGENT_SERVER_BASE_URL", compiled_server_base_url(ctx));
     apply_release_build_env(&mut tauri);
     run_command(&mut tauri, "tauri desktop bundle failed")?;
 
@@ -395,7 +464,7 @@ fn windows_desktop_bundle_command(
         .arg("--bundles")
         .arg(bundles)
         .env("TAURI_CONFIG", tauri_config_patch)
-        .env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL)
+        .env("RTC_AGENT_SERVER_BASE_URL", compiled_server_base_url(ctx))
         .env("RTC_AGENT_BUNDLE_OUTPUT_DIR", &output_dir);
     if let Some(target) = target.filter(|value| !value.trim().is_empty()) {
         tauri.arg("--target").arg(target);
@@ -711,26 +780,22 @@ fn run_command(cmd: &mut Command, context_message: &str) -> Result<()> {
 }
 
 fn apply_release_build_env(cmd: &mut Command) {
-    cmd.env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
-    for name in [
-        "RTC_SERVER_BASE_URL",
-        "RTC_REGISTRATION_TOKEN",
-        "RTC_LOAD_DOTENV",
-        "RTC_CONFIG_FILE",
-        "RTC_PREFERENCES_FILE",
-        "RTC_DEFAULT_SHELL",
-        "RTC_ENABLED_SHELLS",
-        "RTC_DISABLE_HEARTBEAT",
-        "RTC_DISABLE_TUNNEL",
-    ] {
-        cmd.env_remove(name);
-    }
+    let ctx = match resolve_context() {
+        Ok(ctx) => ctx,
+        Err(_) => {
+            cmd.env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
+            return;
+        }
+    };
+
+    apply_build_env(cmd, &ctx);
 }
 
 fn validate_release_server_url(binary_path: &Path, label: &str) -> Result<()> {
+    let ctx = resolve_context()?;
     let mut cmd = Command::new(binary_path);
     cmd.arg("version").arg("--json");
-    apply_release_build_env(&mut cmd);
+    apply_build_env(&mut cmd, &ctx);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let output = cmd
         .output()
@@ -754,12 +819,68 @@ fn validate_release_server_url(binary_path: &Path, label: &str) -> Result<()> {
         .get("serverBaseUrl")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    if actual != RELEASE_SERVER_BASE_URL {
+    let expected = compiled_server_base_url(&ctx);
+    if actual != expected {
         bail!(
-            "{label} compiled with unexpected server base URL `{actual}`; expected `{RELEASE_SERVER_BASE_URL}`"
+            "{label} compiled with unexpected server base URL `{actual}`; expected `{expected}`"
         );
     }
     Ok(())
+}
+
+fn apply_build_env(cmd: &mut Command, ctx: &PackagingContext) {
+    let dotenv_path = ctx.project_root.join(ctx.build_profile.dotenv_file_name());
+    let dotenv_env = dotenv_values(&dotenv_path).unwrap_or_default();
+    let server_base_url = dotenv_env
+        .get("RTC_AGENT_SERVER_BASE_URL")
+        .or_else(|| dotenv_env.get("RTC_SERVER_BASE_URL"))
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| ctx.build_profile.fallback_server_base_url());
+
+    cmd.env("RTC_AGENT_SERVER_BASE_URL", server_base_url);
+
+    if ctx.build_profile.allows_runtime_overrides() {
+        cmd.env("RTC_LOAD_DOTENV", "1");
+        for (key, value) in dotenv_env {
+            if !value.trim().is_empty() {
+                cmd.env(key, value);
+            }
+        }
+    } else {
+        for name in [
+            "RTC_SERVER_BASE_URL",
+            "RTC_REGISTRATION_TOKEN",
+            "RTC_LOAD_DOTENV",
+            "RTC_CONFIG_FILE",
+            "RTC_PREFERENCES_FILE",
+            "RTC_DEFAULT_SHELL",
+            "RTC_ENABLED_SHELLS",
+            "RTC_DISABLE_HEARTBEAT",
+            "RTC_DISABLE_TUNNEL",
+        ] {
+            cmd.env_remove(name);
+        }
+    }
+}
+
+fn dotenv_values(path: &Path) -> Result<BTreeMap<String, String>> {
+    if !path.is_file() {
+        return Ok(BTreeMap::new());
+    }
+
+    let iter = dotenvy::from_path_iter(path)
+        .with_context(|| format!("read {}", path.display()))?;
+    let mut values = BTreeMap::new();
+    for item in iter {
+        let (key, value) = item.with_context(|| format!("parse {}", path.display()))?;
+        values.insert(key, value);
+    }
+    Ok(values)
+}
+
+fn compiled_server_base_url(ctx: &PackagingContext) -> &'static str {
+    ctx.build_profile.fallback_server_base_url()
 }
 
 fn repo_root() -> Result<PathBuf> {

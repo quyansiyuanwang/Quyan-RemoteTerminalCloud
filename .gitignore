@@ -7,3 +7,6 @@ coverage/
 *.tsbuildinfo
 build/
 target/
+
+# .env files
+.env.development

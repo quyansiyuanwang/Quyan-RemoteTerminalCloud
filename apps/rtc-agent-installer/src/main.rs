@@ -42,10 +42,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let result = match cli.command {
         Some(Command::Windows(args)) => run_windows(args),
-        None => {
-            print_help(false)?;
-            Ok(())
-        }
+        None => print_help(false),
     };
     use std::io::Write;
     let _ = std::io::stdout().flush();
@@ -54,6 +51,13 @@ fn main() -> Result<()> {
 
 fn run_windows(args: WindowsArgs) -> Result<()> {
     let action = args.action.unwrap_or_else(|| "help".into());
+    let install_root = args
+        .install_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(default_windows_install_root);
     match action.as_str() {
         "help" | "--help" | "-h" => print_help(args.json),
         "init-config" => {
@@ -97,22 +101,22 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
         }
         "start" | "start-service" => emit_service_result(service::start_service()?, args.json),
         "stop" | "stop-service" => emit_service_result(
-            service::stop_service(args.install_root.as_deref().unwrap_or_default())?,
+            service::stop_service(&install_root)?,
             args.json,
         ),
         "restart" | "restart-service" => emit_service_result(
-            service::restart_service(args.install_root.as_deref().unwrap_or_default())?,
+            service::restart_service(&install_root)?,
             args.json,
         ),
         "install" | "install-service" => emit_service_result(
             service::install_service(
-                args.install_root.as_deref().unwrap_or_default(),
+                &install_root,
                 args.token.as_deref(),
             )?,
             args.json,
         ),
         "uninstall" | "uninstall-service" => emit_service_result(
-            service::uninstall_service(args.install_root.as_deref().unwrap_or_default())?,
+            service::uninstall_service(&install_root)?,
             args.json,
         ),
         "open-config-dir" => {
@@ -174,6 +178,7 @@ fn print_help(as_json: bool) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
+                "defaultInstallRoot": default_windows_install_root(),
                 "commands": [
                     "windows help",
                     "windows init-config",
@@ -191,7 +196,11 @@ fn print_help(as_json: bool) -> Result<()> {
             }))?
         );
     } else {
+        println!("Remote Terminal Cloud Agent Windows installer helper");
+        println!("Default install root: {}", default_windows_install_root());
+        println!();
         println!("Usage:");
+        println!("  rtc-agent-installer");
         println!("  rtc-agent-installer windows help");
         println!("  rtc-agent-installer windows init-config [--json]");
         println!("  rtc-agent-installer windows save-token <token> [--json]");
@@ -204,8 +213,19 @@ fn print_help(as_json: bool) -> Result<()> {
         println!("  rtc-agent-installer windows uninstall [install_root] [--json]");
         println!("  rtc-agent-installer windows open-config-dir [--json]");
         println!("  rtc-agent-installer windows open-logs [--json]");
+        println!();
+        println!("Examples:");
+        println!("  rtc-agent-installer windows install");
+        println!("  rtc-agent-installer windows install . <token>");
     }
     Ok(())
+}
+
+fn default_windows_install_root() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.display().to_string()))
+        .unwrap_or_else(|| ".".into())
 }
 
 fn managed_logs_dir() -> String {

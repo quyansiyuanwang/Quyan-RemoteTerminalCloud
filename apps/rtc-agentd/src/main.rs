@@ -1,6 +1,12 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::cmp;
+
+#[cfg(target_os = "windows")]
+use std::ffi::OsString;
+#[cfg(target_os = "windows")]
+use std::sync::mpsc;
 
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -8,6 +14,7 @@ use rtc_agent_config::{
     RuntimeConfig, default_config_file_path, default_preferences_file_path,
     default_server_base_url, has_registration_token_env_override, persist_registration_token,
     read_runtime_config, load_agent_state, save_agent_state, clear_agent_state, AgentState,
+    load_or_collect_device_fingerprint,
 };
 use rtc_agent_platform::{
     ManagerPaths, collect_host_snapshot, detect_available_shells, resolve_default_shell,
@@ -22,9 +29,22 @@ use serde::Serialize;
 use tokio::task::JoinSet;
 use tracing_subscriber::EnvFilter;
 
+#[cfg(target_os = "windows")]
+use windows_service::{
+    define_windows_service,
+    service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    },
+    service_control_handler::{self, ServiceControlHandlerResult},
+    service_dispatcher,
+};
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
 const RUNTIME_RETRY_INTERVAL: Duration = Duration::from_secs(10);
+const INITIAL_BACKOFF_INTERVAL: Duration = Duration::from_secs(2);
+const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Parser)]
 #[command(name = "rtc-agent", version = VERSION, about = "Remote Terminal Cloud Agent")]
@@ -54,6 +74,9 @@ enum Command {
     Once,
     Start,
     Stop,
+    #[cfg(target_os = "windows")]
+    #[command(name = "service-host", hide = true)]
+    ServiceHost,
     #[command(name = "install-path")]
     InstallPath,
     #[command(name = "uninstall-path")]
@@ -199,6 +222,8 @@ fn main() -> Result<()> {
         }
         Command::Start => run_start(),
         Command::Stop => run_stop(),
+        #[cfg(target_os = "windows")]
+        Command::ServiceHost => run_windows_service_host(),
         Command::InstallPath => run_install_path(),
         Command::UninstallPath => run_uninstall_path(),
         Command::Service(args) => run_service(args),
@@ -206,6 +231,89 @@ fn main() -> Result<()> {
     use std::io::Write;
     let _ = std::io::stdout().flush();
     result
+}
+
+#[cfg(target_os = "windows")]
+define_windows_service!(ffi_service_main, windows_service_main);
+
+#[cfg(target_os = "windows")]
+fn run_windows_service_host() -> Result<()> {
+    service_dispatcher::start(service::WINDOWS_SERVICE_NAME, ffi_service_main)
+        .context("failed to start Windows service dispatcher")?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_service_main(_arguments: Vec<OsString>) {
+    if let Err(err) = run_windows_service_worker() {
+        eprintln!("[remote-terminal-cloud-agent] Windows service failed: {err:#}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_service_worker() -> Result<()> {
+    let (shutdown_tx, shutdown_rx) = mpsc::channel();
+    let status_handle = service_control_handler::register(service::WINDOWS_SERVICE_NAME, move |control| {
+        match control {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                let _ = shutdown_tx.send(());
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
+    })
+    .context("failed to register Windows service control handler")?;
+
+    set_windows_service_status(&status_handle, ServiceState::StartPending, ServiceControlAccept::empty(), 0)?;
+    set_windows_service_status(
+        &status_handle,
+        ServiceState::Running,
+        ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+        0,
+    )?;
+
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(async {
+        tokio::select! {
+            result = run_agent_forever() => result,
+            _ = async { let _ = shutdown_rx.recv(); } => Ok(()),
+        }
+    });
+
+    set_windows_service_status(&status_handle, ServiceState::StopPending, ServiceControlAccept::empty(), 0)?;
+
+    match result {
+        Ok(()) => {
+            set_windows_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 0)?;
+            Ok(())
+        }
+        Err(err) => {
+            set_windows_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 1)?;
+            Err(err)
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_windows_service_status(
+    status_handle: &service_control_handler::ServiceStatusHandle,
+    current_state: ServiceState,
+    controls_accepted: ServiceControlAccept,
+    win32_exit_code: u32,
+) -> Result<()> {
+    status_handle
+        .set_service_status(ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state,
+            controls_accepted,
+            exit_code: ServiceExitCode::Win32(win32_exit_code),
+            checkpoint: 0,
+            wait_hint: Duration::from_secs(10),
+            process_id: None,
+        })
+        .context("failed to update Windows service status")?;
+    Ok(())
 }
 
 fn run_configure(as_json: bool) -> Result<()> {
@@ -566,8 +674,15 @@ async fn run_verify(as_json: bool) -> Result<()> {
     };
 
     let api_client = ApiClient::default();
+    let device_fingerprint = load_or_collect_device_fingerprint(&config.config_file_path)?;
     let session = match api_client
-        .register_agent(&config.server_base_url, &registration_token, snapshot)
+        .register_agent(
+            &config.server_base_url,
+            &registration_token,
+            &device_fingerprint.device_fingerprint,
+            &device_fingerprint.fingerprint_version,
+            snapshot,
+        )
         .await
     {
         Ok(session) => session,
@@ -695,6 +810,7 @@ async fn run_agent_once() -> Result<()> {
     };
 
     let api_client = ApiClient::default();
+    let device_fingerprint = load_or_collect_device_fingerprint(&config.config_file_path)?;
 
     // Try to resume from persisted state (avoids re-using the registration token on reconnect).
     let session = if let Some(saved) = load_agent_state(&config.config_file_path) {
@@ -710,7 +826,13 @@ async fn run_agent_once() -> Result<()> {
         }
     } else {
         let session = match api_client
-            .register_agent(&config.server_base_url, &registration_token, snapshot)
+            .register_agent(
+                &config.server_base_url,
+                &registration_token,
+                &device_fingerprint.device_fingerprint,
+                &device_fingerprint.fingerprint_version,
+                snapshot,
+            )
             .await
         {
             Ok(session) => session,
@@ -719,7 +841,11 @@ async fn run_agent_once() -> Result<()> {
                 return Err(err);
             }
         };
-        println!("[remote-terminal-cloud-agent] registered device {}", session.device_id);
+        println!(
+            "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
+            session.device_id,
+            &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
+        );
         let state = AgentState {
             device_id: session.device_id.clone(),
             heartbeat_token: session.heartbeat_token.clone(),
@@ -750,6 +876,7 @@ async fn run_agent_once() -> Result<()> {
         let config_file_path = config.config_file_path.clone();
         let mut heartbeat_session = session.clone();
         tasks.spawn(async move {
+            let mut failure_backoff = INITIAL_BACKOFF_INTERVAL;
             loop {
                 tokio::time::sleep(Duration::from_secs(
                     heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
@@ -761,15 +888,30 @@ async fn run_agent_once() -> Result<()> {
                     &enabled_shell_types,
                     logs_dir.display().to_string(),
                 )?;
-                heartbeat_session = api_client
+                match api_client
                     .send_heartbeat(&server_base_url, &heartbeat_session, heartbeat_snapshot)
                     .await
-                    .map_err(|err| {
+                {
+                    Ok(next_session) => {
+                        heartbeat_session = next_session;
+                        failure_backoff = INITIAL_BACKOFF_INTERVAL;
+                    }
+                    Err(err) => {
                         print_runtime_error("[remote-terminal-cloud-agent] heartbeat failed", &err);
-                        // Clear state so the next retry triggers a fresh registration.
-                        clear_agent_state(&config_file_path);
-                        err
-                    })?;
+                        if is_authentication_error(&err) {
+                            clear_agent_state(&config_file_path);
+                            return Err(err);
+                        }
+                        let sleep_for = next_backoff_delay(failure_backoff);
+                        eprintln!(
+                            "[remote-terminal-cloud-agent] heartbeat retrying in {} seconds.",
+                            sleep_for.as_secs()
+                        );
+                        tokio::time::sleep(sleep_for).await;
+                        failure_backoff = grow_backoff(failure_backoff);
+                        continue;
+                    }
+                }
                 // Persist updated heartbeat state (interval / websocket_url may change).
                 let _ = save_agent_state(&config_file_path, &AgentState {
                     device_id: heartbeat_session.device_id.clone(),
@@ -790,29 +932,81 @@ async fn run_agent_once() -> Result<()> {
     if config.run_tunnel {
         let server_base_url = config.server_base_url.clone();
         let preferences_file_path = config.preferences_file_path.clone();
+        let config_file_path = config.config_file_path.clone();
+        let tunnel_session = session.clone();
         tasks.spawn(async move {
-            run_agent_tunnel(
-                &server_base_url,
-                session,
-                effective_default_shell,
-                &preferences_file_path,
-            )
-            .await
+            let mut failure_backoff = INITIAL_BACKOFF_INTERVAL;
+            loop {
+                let current_session = tunnel_session.clone();
+                match run_agent_tunnel(
+                    &server_base_url,
+                    current_session,
+                    effective_default_shell,
+                    &preferences_file_path,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        failure_backoff = INITIAL_BACKOFF_INTERVAL;
+                        let sleep_for = next_backoff_delay(failure_backoff);
+                        eprintln!(
+                            "[remote-terminal-cloud-agent] tunnel closed; reconnecting in {} seconds.",
+                            sleep_for.as_secs()
+                        );
+                        tokio::time::sleep(sleep_for).await;
+                        failure_backoff = grow_backoff(failure_backoff);
+                    }
+                    Err(err) => {
+                        print_runtime_error("[remote-terminal-cloud-agent] tunnel failed", &err);
+                        if is_authentication_error(&err) {
+                            clear_agent_state(&config_file_path);
+                            return Err(err);
+                        }
+                        let sleep_for = next_backoff_delay(failure_backoff);
+                        eprintln!(
+                            "[remote-terminal-cloud-agent] tunnel retrying in {} seconds.",
+                            sleep_for.as_secs()
+                        );
+                        tokio::time::sleep(sleep_for).await;
+                        failure_backoff = grow_backoff(failure_backoff);
+                    }
+                }
+            }
         });
     } else {
         println!("[remote-terminal-cloud-agent] tunnel disabled by RTC_DISABLE_TUNNEL=1");
     }
 
-    let task_result = match tasks.join_next().await {
-        Some(result) => result?,
-        None => bail!("agent runtime exited without active tasks"),
-    };
-    // A task failure (e.g. invalid heartbeat token after server restart) should
-    // clear persisted state so the next loop re-registers from scratch.
-    if task_result.is_err() {
-        clear_agent_state(&config.config_file_path);
+    loop {
+        let task_result = match tasks.join_next().await {
+            Some(result) => result?,
+            None => bail!("agent runtime exited without active tasks"),
+        };
+        if let Err(err) = task_result {
+            clear_agent_state(&config.config_file_path);
+            return Err(err);
+        }
     }
-    task_result
+}
+
+fn grow_backoff(current: Duration) -> Duration {
+    cmp::min(current.saturating_mul(2), MAX_BACKOFF_INTERVAL)
+}
+
+fn next_backoff_delay(current: Duration) -> Duration {
+    let jitter_seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.subsec_nanos() as u64)
+        .unwrap_or(0);
+    let jitter = jitter_seed % 2;
+    current.saturating_add(Duration::from_secs(jitter))
+}
+
+fn is_authentication_error(err: &anyhow::Error) -> bool {
+    matches!(
+        describe_error(err).map(|details| details.kind),
+        Some(ApiErrorKind::InvalidToken | ApiErrorKind::Unauthorized)
+    )
 }
 
 fn is_interactive_input_available() -> bool {
@@ -888,6 +1082,36 @@ fn pid_file_path() -> PathBuf {
 }
 
 fn run_start() -> Result<()> {
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        match service::start_service() {
+            Ok(result) => {
+                println!("{}", result.message);
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!(
+                    "[remote-terminal-cloud-agent] service start unavailable, falling back to legacy background mode: {err}"
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match service::start_service() {
+            Ok(result) => {
+                println!("{}", result.message);
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!(
+                    "[remote-terminal-cloud-agent] service start unavailable, falling back to legacy background mode: {err}"
+                );
+            }
+        }
+    }
+
     let pid_path = pid_file_path();
     // Ensure the config directory exists before writing the pid file.
     if let Some(parent) = pid_path.parent() {
@@ -946,6 +1170,36 @@ fn run_start() -> Result<()> {
 }
 
 fn run_stop() -> Result<()> {
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        match service::stop_service("") {
+            Ok(result) => {
+                println!("{}", result.message);
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!(
+                    "[remote-terminal-cloud-agent] service stop unavailable, falling back to legacy PID mode: {err}"
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        match service::stop_service("") {
+            Ok(result) => {
+                println!("{}", result.message);
+                return Ok(());
+            }
+            Err(err) => {
+                eprintln!(
+                    "[remote-terminal-cloud-agent] service stop unavailable, falling back to legacy PID mode: {err}"
+                );
+            }
+        }
+    }
+
     let pid_path = pid_file_path();
     let pid_str = std::fs::read_to_string(&pid_path)
         .context("no pid file found — is the agent running? (use `rtc-agent start`)")?;
