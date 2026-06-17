@@ -225,6 +225,8 @@ fn bundle_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         serde_json::json!({
             "name": "rtc-agent",
             "version": ctx.version,
+            "buildProfile": ctx.build_profile,
+            "serverBaseUrl": compiled_server_base_url(ctx),
             "binary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent")]),
             "desktopBinary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-desktop")]),
             "installerBinary": slash_join(["bin", &binary_file_name(ctx, "rtc-agent-installer")]),
@@ -302,7 +304,35 @@ fn bundle_is_complete(ctx: &PackagingContext) -> bool {
         return false;
     }
 
-    if !ctx.bundle_root.join("bundle.json").is_file() {
+    let bundle_metadata_path = ctx.bundle_root.join("bundle.json");
+    if !bundle_metadata_path.is_file() {
+        return false;
+    }
+
+    let Ok(bundle_metadata_text) = fs::read_to_string(&bundle_metadata_path) else {
+        return false;
+    };
+    let Ok(bundle_metadata) = serde_json::from_str::<Value>(&bundle_metadata_text) else {
+        return false;
+    };
+
+    let expected_profile = serde_json::to_value(ctx.build_profile)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned));
+    let actual_profile = bundle_metadata
+        .get("buildProfile")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    if actual_profile != expected_profile {
+        return false;
+    }
+
+    let expected_server_base_url = compiled_server_base_url(ctx);
+    let actual_server_base_url = bundle_metadata
+        .get("serverBaseUrl")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if actual_server_base_url != expected_server_base_url {
         return false;
     }
 
@@ -359,7 +389,7 @@ fn darwin_desktop_bundle_command(ctx: &PackagingContext) -> Result<BTreeMap<Stri
 
     let mut npm = Command::new(node_package_manager_command());
     npm.current_dir(&desktop_dir).arg("run").arg("build");
-    apply_release_build_env(&mut npm);
+    apply_build_env(&mut npm, ctx);
     run_command(&mut npm, "desktop frontend build failed")?;
 
     let clean_dir = ctx.project_root.join("target").join("release").join("bundle");
@@ -378,7 +408,8 @@ fn darwin_desktop_bundle_command(ctx: &PackagingContext) -> Result<BTreeMap<Stri
         .arg("--bundles")
         .arg("dmg")
         .env("RTC_AGENT_SERVER_BASE_URL", compiled_server_base_url(ctx));
-    apply_release_build_env(&mut tauri);
+    apply_build_env(&mut tauri, ctx);
+    apply_build_env(&mut tauri, ctx);
     run_command(&mut tauri, "tauri desktop bundle failed")?;
 
     let dmg_dir = ctx.project_root.join("target").join("release").join("bundle").join("dmg");
@@ -504,7 +535,7 @@ fn build_cli_binary(
         .arg("-p")
         .arg(package_name)
         .env("CARGO_TARGET_DIR", ctx.project_root.join("target"));
-    apply_release_build_env(&mut cmd);
+    apply_build_env(&mut cmd, ctx);
 
     if ctx.os_name != env::consts::OS || normalize_host_arch(env::consts::ARCH) != ctx.target_arch {
         let target = rust_target_triple(ctx)?;
@@ -528,7 +559,7 @@ fn build_cli_binary(
         )
     })?;
     if package_name == "rtc-agentd" {
-        validate_release_server_url(output_path, package_name)?;
+        validate_release_server_url(ctx, output_path, package_name)?;
     }
     Ok(())
 }
@@ -537,7 +568,7 @@ fn build_desktop_binary(ctx: &PackagingContext, output_dir: &Path) -> Result<()>
     let desktop_dir = ctx.project_root.join("apps").join("rtc-agent-desktop");
     let mut npm = Command::new(node_package_manager_command());
     npm.current_dir(&desktop_dir).arg("run").arg("build");
-    apply_release_build_env(&mut npm);
+    apply_build_env(&mut npm, ctx);
     run_command(&mut npm, "desktop frontend build failed")?;
 
     let mut cargo = Command::new("cargo");
@@ -548,7 +579,7 @@ fn build_desktop_binary(ctx: &PackagingContext, output_dir: &Path) -> Result<()>
         .arg("-p")
         .arg("rtc-agent-desktop")
         .env("CARGO_TARGET_DIR", ctx.project_root.join("target"));
-    apply_release_build_env(&mut cargo);
+    apply_build_env(&mut cargo, ctx);
     run_command(&mut cargo, "desktop Rust build failed")?;
 
     let source = ctx
@@ -779,20 +810,11 @@ fn run_command(cmd: &mut Command, context_message: &str) -> Result<()> {
     Ok(())
 }
 
-fn apply_release_build_env(cmd: &mut Command) {
-    let ctx = match resolve_context() {
-        Ok(ctx) => ctx,
-        Err(_) => {
-            cmd.env("RTC_AGENT_SERVER_BASE_URL", RELEASE_SERVER_BASE_URL);
-            return;
-        }
-    };
-
-    apply_build_env(cmd, &ctx);
-}
-
-fn validate_release_server_url(binary_path: &Path, label: &str) -> Result<()> {
-    let ctx = resolve_context()?;
+fn validate_release_server_url(
+    ctx: &PackagingContext,
+    binary_path: &Path,
+    label: &str,
+) -> Result<()> {
     let mut cmd = Command::new(binary_path);
     cmd.arg("version").arg("--json");
     apply_build_env(&mut cmd, &ctx);
@@ -879,8 +901,19 @@ fn dotenv_values(path: &Path) -> Result<BTreeMap<String, String>> {
     Ok(values)
 }
 
-fn compiled_server_base_url(ctx: &PackagingContext) -> &'static str {
-    ctx.build_profile.fallback_server_base_url()
+fn compiled_server_base_url(ctx: &PackagingContext) -> String {
+    let dotenv_path = ctx.project_root.join(ctx.build_profile.dotenv_file_name());
+    dotenv_values(&dotenv_path)
+        .ok()
+        .and_then(|dotenv_env| {
+            dotenv_env
+                .get("RTC_AGENT_SERVER_BASE_URL")
+                .or_else(|| dotenv_env.get("RTC_SERVER_BASE_URL"))
+                .map(String::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| ctx.build_profile.fallback_server_base_url().to_owned())
 }
 
 fn repo_root() -> Result<PathBuf> {
