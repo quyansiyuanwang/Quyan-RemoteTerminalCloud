@@ -693,6 +693,7 @@ async fn run_agent_forever() -> Result<()> {
 
 async fn run_agent_once() -> Result<()> {
     let mut config = runtime_config();
+    let token_from_env = has_registration_token_env_override();
     let logs_dir = managed_logs_dir();
     let snapshot = collect_host_snapshot(
         VERSION,
@@ -749,81 +750,43 @@ async fn run_agent_once() -> Result<()> {
 
     let api_client = ApiClient::default();
     let device_fingerprint = load_or_collect_device_fingerprint(&config.config_file_path)?;
+    let now_unix_seconds = rtc_agent_config::current_unix_timestamp();
 
-    // Try to resume from persisted state (avoids re-using the registration token on reconnect).
-    let session = if let Some(saved) = load_agent_state(&config.config_file_path) {
-        let same_server = saved.server_base_url.trim().is_empty()
-            || saved.server_base_url == config.server_base_url;
-        let same_fingerprint = saved.device_fingerprint.trim().is_empty()
-            || (saved.device_fingerprint == device_fingerprint.device_fingerprint
-                && (saved.fingerprint_version.trim().is_empty()
-                    || saved.fingerprint_version == device_fingerprint.fingerprint_version));
+    let build_agent_state = |session: &RegisteredAgentSession| AgentState {
+        device_id: session.device_id.clone(),
+        heartbeat_token: session.heartbeat_token.clone(),
+        heartbeat_interval_seconds: session.heartbeat_interval_seconds,
+        websocket_url: session.websocket_url.clone(),
+        server_base_url: config.server_base_url.clone(),
+        device_fingerprint: device_fingerprint.device_fingerprint.clone(),
+        fingerprint_version: device_fingerprint.fingerprint_version.clone(),
+        state_version: rtc_agent_config::AGENT_STATE_VERSION,
+        saved_at_unix_seconds: rtc_agent_config::current_unix_timestamp(),
+    };
 
-        if same_server && same_fingerprint {
-            println!(
-                "[remote-terminal-cloud-agent] resuming persisted session for device {}",
-                saved.device_id
-            );
-            RegisteredAgentSession {
-                device_id: saved.device_id,
-                heartbeat_token: saved.heartbeat_token,
-                heartbeat_interval_seconds: saved.heartbeat_interval_seconds,
-                websocket_url: saved.websocket_url,
-            }
-        } else {
-            println!(
-                "[remote-terminal-cloud-agent] ignoring persisted session because environment changed; re-registering."
-            );
-            clear_agent_state(&config.config_file_path);
-            let session = match api_client
-                .register_agent(
-                    &config.server_base_url,
-                    &registration_token,
-                    &device_fingerprint.device_fingerprint,
-                    &device_fingerprint.fingerprint_version,
-                    snapshot,
-                )
-                .await
-            {
-                Ok(session) => session,
-                Err(err) => {
-                    print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
-                    return Err(err);
-                }
-            };
-            println!(
-                "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
-                session.device_id,
-                &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
-            );
-            let state = AgentState {
-                device_id: session.device_id.clone(),
-                heartbeat_token: session.heartbeat_token.clone(),
-                heartbeat_interval_seconds: session.heartbeat_interval_seconds,
-                websocket_url: session.websocket_url.clone(),
-                server_base_url: config.server_base_url.clone(),
-                device_fingerprint: device_fingerprint.device_fingerprint.clone(),
-                fingerprint_version: device_fingerprint.fingerprint_version.clone(),
-            };
-            if let Err(err) = save_agent_state(&config.config_file_path, &state) {
-                eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
-            }
-            session
-        }
-    } else {
+    let register_fresh_session = async || -> Result<Option<RegisteredAgentSession>> {
         let session = match api_client
             .register_agent(
                 &config.server_base_url,
                 &registration_token,
                 &device_fingerprint.device_fingerprint,
                 &device_fingerprint.fingerprint_version,
-                snapshot,
+                snapshot.clone(),
             )
             .await
         {
             Ok(session) => session,
             Err(err) => {
                 print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
+                clear_agent_state(&config.config_file_path);
+                if is_authentication_error(&err) {
+                    eprintln!(
+                        "[remote-terminal-cloud-agent] registration token was rejected; keep the current token in {} or update RTC_REGISTRATION_TOKEN, then retry.",
+                        config.config_file_path.display()
+                    );
+                    tokio::time::sleep(MISSING_CONFIG_RETRY).await;
+                    return Ok(None);
+                }
                 return Err(err);
             }
         };
@@ -832,19 +795,88 @@ async fn run_agent_once() -> Result<()> {
             session.device_id,
             &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
         );
-        let state = AgentState {
-            device_id: session.device_id.clone(),
-            heartbeat_token: session.heartbeat_token.clone(),
-            heartbeat_interval_seconds: session.heartbeat_interval_seconds,
-            websocket_url: session.websocket_url.clone(),
-            server_base_url: config.server_base_url.clone(),
-            device_fingerprint: device_fingerprint.device_fingerprint.clone(),
-            fingerprint_version: device_fingerprint.fingerprint_version.clone(),
-        };
-        if let Err(err) = save_agent_state(&config.config_file_path, &state) {
+        if let Err(err) = save_agent_state(&config.config_file_path, &build_agent_state(&session)) {
             eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
         }
-        session
+        Ok(Some(session))
+    };
+
+    // Try to resume from persisted state, but only after a successful heartbeat validation.
+    let session = if let Some(saved) = load_agent_state(&config.config_file_path) {
+        let is_fresh = rtc_agent_config::is_agent_state_fresh(&saved, now_unix_seconds);
+        let same_server = saved.server_base_url.trim().is_empty()
+            || saved.server_base_url == config.server_base_url;
+        let same_fingerprint = saved.device_fingerprint.trim().is_empty()
+            || (saved.device_fingerprint == device_fingerprint.device_fingerprint
+                && (saved.fingerprint_version.trim().is_empty()
+                    || saved.fingerprint_version == device_fingerprint.fingerprint_version));
+
+        if is_fresh && same_server && same_fingerprint {
+            println!(
+                "[remote-terminal-cloud-agent] validating persisted session for device {}",
+                saved.device_id
+            );
+            let persisted_session = RegisteredAgentSession {
+                device_id: saved.device_id,
+                heartbeat_token: saved.heartbeat_token,
+                heartbeat_interval_seconds: saved.heartbeat_interval_seconds,
+                websocket_url: saved.websocket_url,
+            };
+
+            match api_client
+                .send_heartbeat(&config.server_base_url, &persisted_session, snapshot.clone())
+                .await
+            {
+                Ok(validated_session) => {
+                    println!(
+                        "[remote-terminal-cloud-agent] resumed persisted session for device {}",
+                        validated_session.device_id
+                    );
+                    if let Err(err) =
+                        save_agent_state(&config.config_file_path, &build_agent_state(&validated_session))
+                    {
+                        eprintln!(
+                            "[remote-terminal-cloud-agent] warning: could not persist validated state: {err}"
+                        );
+                    }
+                    validated_session
+                }
+                Err(err) => {
+                    print_runtime_error(
+                        "[remote-terminal-cloud-agent] persisted session heartbeat check failed; re-registering",
+                        &err,
+                    );
+                    clear_agent_state(&config.config_file_path);
+                    match register_fresh_session().await? {
+                        Some(session) => session,
+                        None => return Ok(()),
+                    }
+                }
+            }
+        } else if !is_fresh {
+            println!(
+                "[remote-terminal-cloud-agent] ignoring persisted session because state cache expired; re-registering."
+            );
+            clear_agent_state(&config.config_file_path);
+            match register_fresh_session().await? {
+                Some(session) => session,
+                None => return Ok(()),
+            }
+        } else {
+            println!(
+                "[remote-terminal-cloud-agent] ignoring persisted session because environment changed; re-registering."
+            );
+            clear_agent_state(&config.config_file_path);
+            match register_fresh_session().await? {
+                Some(session) => session,
+                None => return Ok(()),
+            }
+        }
+    } else {
+        match register_fresh_session().await? {
+            Some(session) => session,
+            None => return Ok(()),
+        }
     };
 
     if !config.run_heartbeat && !config.run_tunnel {
@@ -910,6 +942,8 @@ async fn run_agent_once() -> Result<()> {
                     server_base_url: server_base_url.clone(),
                     device_fingerprint: device_fingerprint.device_fingerprint.clone(),
                     fingerprint_version: device_fingerprint.fingerprint_version.clone(),
+                    state_version: rtc_agent_config::AGENT_STATE_VERSION,
+                    saved_at_unix_seconds: rtc_agent_config::current_unix_timestamp(),
                 });
                 println!(
                     "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",

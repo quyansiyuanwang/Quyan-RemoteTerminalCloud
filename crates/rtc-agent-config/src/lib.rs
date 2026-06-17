@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rtc_agent_protocol::ShellType;
@@ -231,6 +232,16 @@ pub fn persist_registration_token(path: &Path, token: &str) -> Result<()> {
     fs::write(path, payload).with_context(|| format!("write {}", path.display()))
 }
 
+pub fn clear_registration_token(path: &Path) -> Result<()> {
+    let mut config = read_config_file(path);
+    config.registration_token = None;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let payload = serde_json::to_string_pretty(&config)?;
+    fs::write(path, payload).with_context(|| format!("write {}", path.display()))
+}
+
 pub fn has_registration_token_env_override() -> bool {
     normalize_template_string(env::var("RTC_REGISTRATION_TOKEN").ok()).is_some()
 }
@@ -250,7 +261,14 @@ pub struct AgentState {
     pub device_fingerprint: String,
     #[serde(default)]
     pub fingerprint_version: String,
+    #[serde(default)]
+    pub state_version: u32,
+    #[serde(default)]
+    pub saved_at_unix_seconds: u64,
 }
+
+pub const AGENT_STATE_VERSION: u32 = 1;
+pub const AGENT_STATE_MAX_AGE_SECONDS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -351,6 +369,23 @@ pub fn load_agent_state(config_file_path: &Path) -> Option<AgentState> {
     let path = state_file_path(config_file_path);
     let content = fs::read_to_string(&path).ok()?;
     serde_json::from_str(&content).ok()
+}
+
+pub fn current_unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+pub fn is_agent_state_fresh(state: &AgentState, now_unix_seconds: u64) -> bool {
+    if state.state_version != AGENT_STATE_VERSION {
+        return false;
+    }
+    if state.saved_at_unix_seconds == 0 || state.saved_at_unix_seconds > now_unix_seconds {
+        return false;
+    }
+    now_unix_seconds.saturating_sub(state.saved_at_unix_seconds) <= AGENT_STATE_MAX_AGE_SECONDS
 }
 
 pub fn save_agent_state(config_file_path: &Path, state: &AgentState) -> Result<()> {
@@ -531,7 +566,10 @@ fn parse_shell_type(value: String) -> Option<ShellType> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FingerprintMaterial, build_device_fingerprint_from_material, normalize_fingerprint_source};
+    use super::{
+        AGENT_STATE_MAX_AGE_SECONDS, AGENT_STATE_VERSION, AgentState, FingerprintMaterial,
+        build_device_fingerprint_from_material, is_agent_state_fresh, normalize_fingerprint_source,
+    };
 
     #[test]
     fn fingerprint_is_stable_across_restart() {
@@ -566,5 +604,46 @@ mod tests {
     #[test]
     fn normalization_compacts_separators() {
         assert_eq!(normalize_fingerprint_source("  A_B:C  "), "a-b-c");
+    }
+
+    #[test]
+    fn legacy_agent_state_deserializes_but_is_not_fresh() {
+        let legacy = serde_json::json!({
+            "deviceId": "device-1",
+            "heartbeatToken": "token-1",
+            "heartbeatIntervalSeconds": 30,
+            "websocketUrl": "wss://example.invalid/ws",
+            "serverBaseUrl": "https://example.invalid",
+            "deviceFingerprint": "fingerprint-1",
+            "fingerprintVersion": "v1"
+        });
+
+        let state: AgentState = serde_json::from_value(legacy).expect("legacy state should deserialize");
+        assert_eq!(state.state_version, 0);
+        assert_eq!(state.saved_at_unix_seconds, 0);
+        assert!(!is_agent_state_fresh(&state, 1_000));
+    }
+
+    #[test]
+    fn fresh_agent_state_requires_current_version_and_recent_timestamp() {
+        let now = 10_000;
+        let fresh = AgentState {
+            device_id: "device-1".into(),
+            heartbeat_token: "token-1".into(),
+            heartbeat_interval_seconds: 30,
+            websocket_url: "wss://example.invalid/ws".into(),
+            server_base_url: "https://example.invalid".into(),
+            device_fingerprint: "fingerprint-1".into(),
+            fingerprint_version: "v1".into(),
+            state_version: AGENT_STATE_VERSION,
+            saved_at_unix_seconds: now - AGENT_STATE_MAX_AGE_SECONDS,
+        };
+        assert!(is_agent_state_fresh(&fresh, now));
+
+        let stale = AgentState {
+            saved_at_unix_seconds: now - AGENT_STATE_MAX_AGE_SECONDS - 1,
+            ..fresh.clone()
+        };
+        assert!(!is_agent_state_fresh(&stale, now));
     }
 }
