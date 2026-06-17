@@ -693,7 +693,6 @@ async fn run_agent_forever() -> Result<()> {
 
 async fn run_agent_once() -> Result<()> {
     let mut config = runtime_config();
-    let token_from_env = has_registration_token_env_override();
     let logs_dir = managed_logs_dir();
     let snapshot = collect_host_snapshot(
         VERSION,
