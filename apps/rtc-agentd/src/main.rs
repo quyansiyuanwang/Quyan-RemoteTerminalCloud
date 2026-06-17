@@ -1,7 +1,8 @@
-use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+mod path_ops;
+mod support;
+
+use std::path::Path;
 use std::time::Duration;
-use std::cmp;
 
 #[cfg(target_os = "windows")]
 use std::ffi::OsString;
@@ -11,15 +12,13 @@ use std::sync::mpsc;
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand};
 use rtc_agent_config::{
-    RuntimeConfig, default_config_file_path, default_preferences_file_path,
-    default_server_base_url, has_registration_token_env_override, persist_registration_token,
-    read_runtime_config, load_agent_state, save_agent_state, clear_agent_state, AgentState,
-    load_or_collect_device_fingerprint,
+    AgentState, clear_agent_state, default_server_base_url,
+    has_registration_token_env_override, load_agent_state, load_or_collect_device_fingerprint,
+    save_agent_state,
 };
 use rtc_agent_platform::{
-    ManagerPaths, collect_host_snapshot, detect_available_shells, resolve_default_shell,
+    collect_host_snapshot, detect_available_shells, resolve_default_shell,
 };
-use rtc_agent_preferences::PreferencesStore;
 use rtc_agent_protocol::ShellType;
 use rtc_agent_runtime::{
     ApiClient, ApiErrorDetails, ApiErrorKind, RegisteredAgentSession, describe_error, run_agent_tunnel,
@@ -28,6 +27,14 @@ use rtc_agent_service as service;
 use serde::Serialize;
 use tokio::task::JoinSet;
 use tracing_subscriber::EnvFilter;
+
+use crate::path_ops::{run_install_path, run_start, run_stop, run_uninstall_path};
+use crate::support::{
+    emit_json, grow_backoff, is_authentication_error, is_interactive_input_available,
+    join_shells, managed_logs_dir, manager_paths, next_backoff_delay, print_runtime_error,
+    prompt_and_persist_registration_token, read_preferences_summary, runtime_config,
+    user_label_for_error_kind,
+};
 
 #[cfg(target_os = "windows")]
 use windows_service::{
@@ -564,75 +571,6 @@ fn run_service(args: ServiceArgs) -> Result<()> {
     }
 }
 
-fn runtime_config() -> RuntimeConfig {
-    read_runtime_config(default_server_base_url())
-}
-
-fn manager_paths() -> ManagerPaths {
-    let config_file_path = default_config_file_path();
-    let config_dir = config_file_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let preferences_path = default_preferences_file_path();
-    let logs_dir = managed_logs_dir();
-    ManagerPaths { config_dir, config_file_path, preferences_path, logs_dir }
-}
-
-fn managed_logs_dir() -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        let base = std::env::var("ProgramData")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        return base.join("RemoteTerminalCloudAgent").join("logs");
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        default_preferences_file_path().parent().unwrap_or(Path::new(".")).join("logs")
-    }
-}
-
-fn read_preferences_summary(path: &Path) -> PreferencesSummary {
-    let store = PreferencesStore::new(path);
-    let preferences = store.get_preferences();
-    PreferencesSummary {
-        default_working_directory: preferences.default_working_directory,
-        shortcuts_count: preferences.shortcuts.len(),
-        quick_commands_count: preferences.quick_commands.len(),
-    }
-}
-
-fn prompt_and_persist_registration_token(path: &Path) -> Result<Option<String>> {
-    println!(
-        "[remote-terminal-cloud-agent] registration token is not configured. Enter token to save into {}",
-        path.display()
-    );
-    print!("[remote-terminal-cloud-agent] token (press Enter to save, empty to skip): ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let token = input.trim().to_owned();
-    if token.is_empty() {
-        return Ok(None);
-    }
-    persist_registration_token(path, &token)?;
-    println!("[remote-terminal-cloud-agent] token saved to {}", path.display());
-    Ok(Some(token))
-}
-
-fn join_shells(items: &[ShellType]) -> String {
-    if items.is_empty() {
-        "none".into()
-    } else {
-        items.iter().map(|item| item.as_str()).collect::<Vec<_>>().join(", ")
-    }
-}
-
-fn emit_json<T: Serialize>(value: &T) -> Result<()> {
-    println!("{}", serde_json::to_string_pretty(value)?);
-    Ok(())
-}
-
 async fn run_verify(as_json: bool) -> Result<()> {
     let config = runtime_config();
     let logs_dir = managed_logs_dir();
@@ -814,15 +752,63 @@ async fn run_agent_once() -> Result<()> {
 
     // Try to resume from persisted state (avoids re-using the registration token on reconnect).
     let session = if let Some(saved) = load_agent_state(&config.config_file_path) {
-        println!(
-            "[remote-terminal-cloud-agent] resuming persisted session for device {}",
-            saved.device_id
-        );
-        RegisteredAgentSession {
-            device_id: saved.device_id,
-            heartbeat_token: saved.heartbeat_token,
-            heartbeat_interval_seconds: saved.heartbeat_interval_seconds,
-            websocket_url: saved.websocket_url,
+        let same_server = saved.server_base_url.trim().is_empty()
+            || saved.server_base_url == config.server_base_url;
+        let same_fingerprint = saved.device_fingerprint.trim().is_empty()
+            || (saved.device_fingerprint == device_fingerprint.device_fingerprint
+                && (saved.fingerprint_version.trim().is_empty()
+                    || saved.fingerprint_version == device_fingerprint.fingerprint_version));
+
+        if same_server && same_fingerprint {
+            println!(
+                "[remote-terminal-cloud-agent] resuming persisted session for device {}",
+                saved.device_id
+            );
+            RegisteredAgentSession {
+                device_id: saved.device_id,
+                heartbeat_token: saved.heartbeat_token,
+                heartbeat_interval_seconds: saved.heartbeat_interval_seconds,
+                websocket_url: saved.websocket_url,
+            }
+        } else {
+            println!(
+                "[remote-terminal-cloud-agent] ignoring persisted session because environment changed; re-registering."
+            );
+            clear_agent_state(&config.config_file_path);
+            let session = match api_client
+                .register_agent(
+                    &config.server_base_url,
+                    &registration_token,
+                    &device_fingerprint.device_fingerprint,
+                    &device_fingerprint.fingerprint_version,
+                    snapshot,
+                )
+                .await
+            {
+                Ok(session) => session,
+                Err(err) => {
+                    print_runtime_error("[remote-terminal-cloud-agent] registration failed", &err);
+                    return Err(err);
+                }
+            };
+            println!(
+                "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
+                session.device_id,
+                &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
+            );
+            let state = AgentState {
+                device_id: session.device_id.clone(),
+                heartbeat_token: session.heartbeat_token.clone(),
+                heartbeat_interval_seconds: session.heartbeat_interval_seconds,
+                websocket_url: session.websocket_url.clone(),
+                server_base_url: config.server_base_url.clone(),
+                device_fingerprint: device_fingerprint.device_fingerprint.clone(),
+                fingerprint_version: device_fingerprint.fingerprint_version.clone(),
+            };
+            if let Err(err) = save_agent_state(&config.config_file_path, &state) {
+                eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
+            }
+            session
         }
     } else {
         let session = match api_client
@@ -851,6 +837,9 @@ async fn run_agent_once() -> Result<()> {
             heartbeat_token: session.heartbeat_token.clone(),
             heartbeat_interval_seconds: session.heartbeat_interval_seconds,
             websocket_url: session.websocket_url.clone(),
+            server_base_url: config.server_base_url.clone(),
+            device_fingerprint: device_fingerprint.device_fingerprint.clone(),
+            fingerprint_version: device_fingerprint.fingerprint_version.clone(),
         };
         if let Err(err) = save_agent_state(&config.config_file_path, &state) {
             eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
@@ -918,6 +907,9 @@ async fn run_agent_once() -> Result<()> {
                     heartbeat_token: heartbeat_session.heartbeat_token.clone(),
                     heartbeat_interval_seconds: heartbeat_session.heartbeat_interval_seconds,
                     websocket_url: heartbeat_session.websocket_url.clone(),
+                    server_base_url: server_base_url.clone(),
+                    device_fingerprint: device_fingerprint.device_fingerprint.clone(),
+                    fingerprint_version: device_fingerprint.fingerprint_version.clone(),
                 });
                 println!(
                     "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
@@ -989,30 +981,6 @@ async fn run_agent_once() -> Result<()> {
     }
 }
 
-fn grow_backoff(current: Duration) -> Duration {
-    cmp::min(current.saturating_mul(2), MAX_BACKOFF_INTERVAL)
-}
-
-fn next_backoff_delay(current: Duration) -> Duration {
-    let jitter_seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.subsec_nanos() as u64)
-        .unwrap_or(0);
-    let jitter = jitter_seed % 2;
-    current.saturating_add(Duration::from_secs(jitter))
-}
-
-fn is_authentication_error(err: &anyhow::Error) -> bool {
-    matches!(
-        describe_error(err).map(|details| details.kind),
-        Some(ApiErrorKind::InvalidToken | ApiErrorKind::Unauthorized)
-    )
-}
-
-fn is_interactive_input_available() -> bool {
-    io::stdin().is_terminal() && io::stdout().is_terminal()
-}
-
 fn emit_verify_error(
     as_json: bool,
     server_base_url: &str,
@@ -1073,397 +1041,6 @@ fn emit_verify_error(
         "suggestion: Retry once. If it still fails, inspect the backend and local network path."
     );
     Ok(())
-}
-
-// ── Background (daemon-like) start / stop ──
-
-fn pid_file_path() -> PathBuf {
-    manager_paths().config_dir.join("rtc-agent.pid")
-}
-
-fn run_start() -> Result<()> {
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        match service::start_service() {
-            Ok(result) => {
-                println!("{}", result.message);
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!(
-                    "[remote-terminal-cloud-agent] service start unavailable, falling back to legacy background mode: {err}"
-                );
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        match service::start_service() {
-            Ok(result) => {
-                println!("{}", result.message);
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!(
-                    "[remote-terminal-cloud-agent] service start unavailable, falling back to legacy background mode: {err}"
-                );
-            }
-        }
-    }
-
-    let pid_path = pid_file_path();
-    // Ensure the config directory exists before writing the pid file.
-    if let Some(parent) = pid_path.parent() {
-        std::fs::create_dir_all(parent).context("create config dir")?;
-    }
-    // Check if already running
-    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-        let pid: u32 = pid_str.trim().parse().unwrap_or(0);
-        if pid > 0 && process_is_running(pid) {
-            println!("[remote-terminal-cloud-agent] already running (pid {pid})");
-            return Ok(());
-        }
-    }
-
-    let exe = std::env::current_exe().context("cannot resolve current executable path")?;
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        let child = std::process::Command::new(&exe)
-            .arg("run")
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-            .spawn()
-            .context("failed to spawn background process")?;
-        let pid = child.id();
-        std::fs::write(&pid_path, pid.to_string()).context("write pid file")?;
-        println!("[remote-terminal-cloud-agent] started in background (pid {pid})");
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let logs_dir = manager_paths().logs_dir;
-        std::fs::create_dir_all(&logs_dir).ok();
-        let stdout_log = logs_dir.join("rtc-agent.log");
-        let stdout_file = std::fs::OpenOptions::new()
-            .create(true).append(true).open(&stdout_log)
-            .context("open stdout log")?;
-        let stderr_file = stdout_file.try_clone().context("clone log fd")?;
-        let child = std::process::Command::new(&exe)
-            .arg("run")
-            .stdout(stdout_file)
-            .stderr(stderr_file)
-            .spawn()
-            .context("failed to spawn background process")?;
-        let pid = child.id();
-        std::fs::write(&pid_path, pid.to_string()).context("write pid file")?;
-        println!(
-            "[remote-terminal-cloud-agent] started in background (pid {pid}), logs: {}",
-            stdout_log.display()
-        );
-    }
-
-    Ok(())
-}
-
-fn run_stop() -> Result<()> {
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        match service::stop_service("") {
-            Ok(result) => {
-                println!("{}", result.message);
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!(
-                    "[remote-terminal-cloud-agent] service stop unavailable, falling back to legacy PID mode: {err}"
-                );
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        match service::stop_service("") {
-            Ok(result) => {
-                println!("{}", result.message);
-                return Ok(());
-            }
-            Err(err) => {
-                eprintln!(
-                    "[remote-terminal-cloud-agent] service stop unavailable, falling back to legacy PID mode: {err}"
-                );
-            }
-        }
-    }
-
-    let pid_path = pid_file_path();
-    let pid_str = std::fs::read_to_string(&pid_path)
-        .context("no pid file found — is the agent running? (use `rtc-agent start`)")?;
-    let pid: u32 = pid_str.trim().parse().context("invalid pid file")?;
-
-    #[cfg(target_os = "windows")]
-    {
-        let status = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .status()
-            .context("taskkill failed")?;
-        if !status.success() {
-            bail!("taskkill returned non-zero for pid {pid}");
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let status = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
-        match status {
-            Ok(s) if s.success() => {}
-            Ok(_) => {
-                // process may already be gone
-                println!("[remote-terminal-cloud-agent] process {pid} not found, cleaning up pid file");
-            }
-            Err(e) => bail!("kill failed: {e}"),
-        }
-    }
-
-    std::fs::remove_file(&pid_path).ok();
-    println!("[remote-terminal-cloud-agent] stopped (pid {pid})");
-    Ok(())
-}
-
-fn process_is_running(pid: u32) -> bool {
-    #[cfg(target_os = "windows")]
-    {
-        let out = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output();
-        match out {
-            Ok(o) => String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()),
-            Err(_) => false,
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-    }
-}
-
-// ── PATH registration ──
-
-fn run_uninstall_path() -> Result<()> {
-    let exe = std::env::current_exe().context("cannot resolve current executable path")?;
-    let bin_dir = exe.parent().context("executable has no parent directory")?;
-
-    #[cfg(target_os = "windows")]
-    {
-        windows_unregister_path(bin_dir)?;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        unix_unregister_path(bin_dir)?;
-    }
-    Ok(())
-}
-
-fn run_install_path() -> Result<()> {
-    let exe = std::env::current_exe().context("cannot resolve current executable path")?;
-    let bin_dir = exe.parent().context("executable has no parent directory")?;
-
-    #[cfg(target_os = "windows")]
-    {
-        windows_register_path(bin_dir)?;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        unix_register_path(bin_dir)?;
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn windows_unregister_path(bin_dir: &std::path::Path) -> Result<()> {
-    let bin_str = bin_dir.to_string_lossy();
-    let output = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Environment", "/v", "Path"])
-        .output()
-        .context("reg query failed")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let current_path = stdout.lines()
-        .find(|l| l.trim_start().starts_with("Path"))
-        .map(|l| {
-            let parts: Vec<&str> = l.splitn(4, "    ").filter(|s| !s.is_empty()).collect();
-            parts.last().copied().unwrap_or("").to_owned()
-        })
-        .unwrap_or_default();
-
-    if !current_path.to_lowercase().contains(&bin_str.to_lowercase()) {
-        println!("[remote-terminal-cloud-agent] PATH does not contain {bin_str}, nothing to remove");
-        return Ok(());
-    }
-
-    // Remove the entry (handle leading/trailing semicolons)
-    let new_path: String = current_path.split(';')
-        .filter(|seg| !seg.eq_ignore_ascii_case(&bin_str))
-        .collect::<Vec<_>>()
-        .join(";");
-
-    let status = std::process::Command::new("reg")
-        .args(["add", r"HKCU\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", &new_path, "/f"])
-        .status()
-        .context("reg add failed")?;
-    if !status.success() {
-        bail!("reg add returned non-zero");
-    }
-    println!("[remote-terminal-cloud-agent] removed {bin_str} from HKCU\\Environment\\Path");
-    println!("  Note: open a new terminal window for the change to take effect.");
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn windows_register_path(bin_dir: &std::path::Path) -> Result<()> {
-    let bin_str = bin_dir.to_string_lossy();
-    // Read existing user PATH from registry
-    let output = std::process::Command::new("reg")
-        .args(["query", r"HKCU\Environment", "/v", "Path"])
-        .output()
-        .context("reg query failed")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Extract the value (last non-empty line after "Path")
-    let current_path = stdout.lines()
-        .find(|l| l.trim_start().starts_with("Path"))
-        .map(|l| {
-            // format: "    Path    REG_SZ    <value>"  or "    Path    REG_EXPAND_SZ    <value>"
-            let parts: Vec<&str> = l.splitn(4, "    ").filter(|s| !s.is_empty()).collect();
-            parts.last().copied().unwrap_or("").to_owned()
-        })
-        .unwrap_or_default();
-
-    if current_path.to_lowercase().contains(&bin_str.to_lowercase()) {
-        println!("[remote-terminal-cloud-agent] PATH already contains {bin_str}");
-        return Ok(());
-    }
-
-    let new_path = if current_path.is_empty() {
-        bin_str.to_string()
-    } else {
-        format!("{current_path};{bin_str}")
-    };
-
-    let status = std::process::Command::new("reg")
-        .args(["add", r"HKCU\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", &new_path, "/f"])
-        .status()
-        .context("reg add failed")?;
-    if !status.success() {
-        bail!("reg add returned non-zero");
-    }
-    println!("[remote-terminal-cloud-agent] added {bin_str} to HKCU\\Environment\\Path");
-    println!("  Note: open a new terminal window for PATH to take effect.");
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn unix_unregister_path(bin_dir: &std::path::Path) -> Result<()> {
-    let bin_str = bin_dir.to_string_lossy();
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        bail!("$HOME is not set");
-    }
-    let candidates: &[&str] = &[".zshrc", ".bashrc", ".bash_profile", ".profile"];
-    for rc in candidates {
-        let path = PathBuf::from(&home).join(rc);
-        if !path.exists() { continue; }
-        let contents = std::fs::read_to_string(&path).unwrap_or_default();
-        if !contents.contains(bin_str.as_ref()) { continue; }
-        // Remove lines that contain the bin_str (the export line we wrote)
-        let new_contents: String = contents.lines()
-            .filter(|l| !l.contains(bin_str.as_ref()))
-            .map(|l| format!("{l}\n"))
-            .collect();
-        std::fs::write(&path, new_contents).with_context(|| format!("write ~/{rc}"))?;
-        println!("[remote-terminal-cloud-agent] removed PATH entry from ~/{rc}");
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn unix_register_path(bin_dir: &std::path::Path) -> Result<()> {
-    let bin_str = bin_dir.to_string_lossy();
-    let export_line = format!("\nexport PATH=\"{bin_str}:$PATH\"  # rtc-agent\n");
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        bail!("$HOME is not set");
-    }
-
-    // Candidate rc files — append to whichever exist, always append to .profile as fallback
-    let candidates: &[&str] = &[".zshrc", ".bashrc", ".bash_profile"];
-    let mut wrote_any = false;
-    for rc in candidates {
-        let path = PathBuf::from(&home).join(rc);
-        if path.exists() {
-            let contents = std::fs::read_to_string(&path).unwrap_or_default();
-            if contents.contains(bin_str.as_ref()) {
-                println!("[remote-terminal-cloud-agent] {rc} already contains {bin_str}");
-                wrote_any = true;
-                continue;
-            }
-            std::fs::OpenOptions::new()
-                .append(true).open(&path)
-                .and_then(|mut f| { use std::io::Write; f.write_all(export_line.as_bytes()) })
-                .with_context(|| format!("write to ~/{rc}"))?;
-            println!("[remote-terminal-cloud-agent] appended PATH entry to ~/{rc}");
-            wrote_any = true;
-        }
-    }
-
-    // Always ensure .profile exists as universal fallback
-    let profile = PathBuf::from(&home).join(".profile");
-    let profile_contents = std::fs::read_to_string(&profile).unwrap_or_default();
-    if !profile_contents.contains(bin_str.as_ref()) {
-        std::fs::OpenOptions::new()
-            .create(true).append(true).open(&profile)
-            .and_then(|mut f| { use std::io::Write; f.write_all(export_line.as_bytes()) })
-            .context("write to ~/.profile")?;
-        println!("[remote-terminal-cloud-agent] appended PATH entry to ~/.profile");
-        wrote_any = true;
-    }
-
-    if wrote_any {
-        println!("  Run: source ~/.bashrc  (or open a new shell) for PATH to take effect.");
-        println!("  You can then use: rtc-agent start  /  rtc-agent stop  /  rtc-agent status");
-    }
-    Ok(())
-}
-
-fn print_runtime_error(prefix: &str, err: &anyhow::Error) {
-    if let Some(details) = describe_error(err) {
-        eprintln!("{prefix}: {}", details.message);
-        eprintln!("[remote-terminal-cloud-agent] suggestion: {}", details.suggestion);
-    } else {
-        eprintln!("{prefix}: {err}");
-    }
-}
-
-fn user_label_for_error_kind(kind: &ApiErrorKind) -> &'static str {
-    match kind {
-        ApiErrorKind::InvalidToken => "invalid or expired token",
-        ApiErrorKind::DeviceLimitReached => "device limit reached",
-        ApiErrorKind::GatewayUnavailable => "backend gateway unavailable",
-        ApiErrorKind::ProxyConfiguration => "proxy or gateway issue",
-        ApiErrorKind::WebsocketUnavailable => "websocket connection unavailable",
-        ApiErrorKind::Unauthorized => "backend rejected credentials",
-        ApiErrorKind::ServerRejected => "backend rejected request",
-        ApiErrorKind::Transport => "network transport issue",
-        ApiErrorKind::Unexpected => "unexpected error",
-    }
 }
 
 impl From<ApiErrorDetails> for VerifyErrorDetails {

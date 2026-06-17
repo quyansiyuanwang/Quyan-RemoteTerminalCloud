@@ -244,6 +244,12 @@ pub struct AgentState {
     pub heartbeat_token: String,
     pub heartbeat_interval_seconds: i32,
     pub websocket_url: String,
+    #[serde(default)]
+    pub server_base_url: String,
+    #[serde(default)]
+    pub device_fingerprint: String,
+    #[serde(default)]
+    pub fingerprint_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
