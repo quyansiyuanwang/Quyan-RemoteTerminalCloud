@@ -17,7 +17,7 @@ SetCompressor /SOLID lzma
 ; Metadata
 ;--------------------------------
 !ifndef AGENT_VERSION
-  !define AGENT_VERSION "0.6.0"
+  !define AGENT_VERSION "0.6.1"
 !endif
 !ifndef AGENT_BUILD_ROOT
   !error "AGENT_BUILD_ROOT must be defined (e.g. /DAGENT_BUILD_ROOT=...)"
