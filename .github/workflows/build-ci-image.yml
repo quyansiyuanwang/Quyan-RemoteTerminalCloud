@@ -27,5 +27,5 @@ jobs:
           context: .
           file: .github/docker/ci.Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}/ci:latest
+          tags: ghcr.io/${{ lower(github.repository) }}/ci:latest
           provenance: false
