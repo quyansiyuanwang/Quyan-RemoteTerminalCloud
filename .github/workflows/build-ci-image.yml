@@ -21,11 +21,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Lowercase repo
+        id: repo
+        run: echo "REPO=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: .github/docker/ci.Dockerfile
           push: true
-          tags: ghcr.io/${{ lower(github.repository) }}/ci:latest
+          tags: ghcr.io/${{ steps.repo.outputs.REPO }}/ci:latest
           provenance: false
