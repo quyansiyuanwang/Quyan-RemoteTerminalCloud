@@ -421,13 +421,12 @@ async fn restart_agent(app: &AppHandle, state: &DesktopState, force_restart: boo
 }
 
 async fn reconcile_agent_state(state: &DesktopState) {
-    if let Ok(mut agent) = state.agent.lock() {
-        if agent.task.is_none()
-            && agent.desired_running
-            && matches!(agent.runtime.phase, DesktopRuntimePhase::Idle)
-        {
-            agent.runtime.phase = DesktopRuntimePhase::Stopped;
-        }
+    if let Ok(mut agent) = state.agent.lock()
+        && agent.task.is_none()
+        && agent.desired_running
+        && matches!(agent.runtime.phase, DesktopRuntimePhase::Idle)
+    {
+        agent.runtime.phase = DesktopRuntimePhase::Stopped;
     }
 }
 
@@ -1085,7 +1084,7 @@ fn managed_logs_dir() -> PathBuf {
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        return base.join("RemoteTerminalCloudAgent").join("logs");
+        base.join("RemoteTerminalCloudAgent").join("logs")
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1185,15 +1184,15 @@ fn looks_like_service_running(result: &service::ServiceActionResult) -> bool {
 fn is_autostart_enabled() -> bool {
     #[cfg(target_os = "windows")]
     {
-        return windows_run_key()
+        windows_run_key()
             .ok()
             .and_then(|key| key.get_value::<String, _>(APP_RUN_REG_VALUE).ok())
             .map(|value| !value.trim().is_empty())
-            .unwrap_or(false);
+            .unwrap_or(false)
     }
     #[cfg(target_os = "macos")]
     {
-        return macos_autostart_plist_path().exists();
+        macos_autostart_plist_path().exists()
     }
     #[cfg(target_os = "linux")]
     {
@@ -1212,7 +1211,7 @@ fn enable_autostart() -> Result<()> {
         let key = windows_run_key_write()?;
         key.set_value(APP_RUN_REG_VALUE, &format!("\"{}\"", exe.display()))
             .context("update autostart registry value")?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "macos")]
     {
@@ -1242,7 +1241,7 @@ fn enable_autostart() -> Result<()> {
             exe = exe.display()
         );
         fs::write(&plist_path, plist).context("write LaunchAgent plist")?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -1261,7 +1260,7 @@ X-GNOME-Autostart-enabled=true
             exe = exe.display()
         );
         fs::write(&desktop_path, content).context("write XDG autostart desktop file")?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
@@ -1280,7 +1279,7 @@ fn disable_autostart() -> Result<()> {
                 return Err(anyhow!(err).context("remove autostart registry value"));
             }
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "macos")]
     {
@@ -1288,7 +1287,7 @@ fn disable_autostart() -> Result<()> {
         if plist_path.exists() {
             fs::remove_file(&plist_path).context("remove LaunchAgent plist")?;
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(target_os = "linux")]
     {
@@ -1296,7 +1295,7 @@ fn disable_autostart() -> Result<()> {
         if desktop_path.exists() {
             fs::remove_file(&desktop_path).context("remove XDG autostart desktop file")?;
         }
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {

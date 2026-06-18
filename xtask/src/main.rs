@@ -49,13 +49,7 @@ struct VersionArgs {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let build_profile = if cli.dev {
-        BuildProfile::Dev
-    } else if cli.prod {
-        BuildProfile::Prod
-    } else {
-        BuildProfile::Prod
-    };
+    let build_profile = if cli.dev { BuildProfile::Dev } else { BuildProfile::Prod };
     let ctx = resolve_context_for_profile(build_profile)?;
 
     let result = match cli.command {

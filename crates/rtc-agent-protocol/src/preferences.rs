@@ -9,17 +9,12 @@ pub enum RemoteTerminalShortcutModifier {
     Meta,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RemoteTerminalShortcutKind {
+    #[default]
     Sequence,
     Key,
-}
-
-impl Default for RemoteTerminalShortcutKind {
-    fn default() -> Self {
-        Self::Sequence
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

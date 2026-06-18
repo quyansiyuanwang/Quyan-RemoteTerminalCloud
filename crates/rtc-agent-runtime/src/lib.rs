@@ -542,10 +542,10 @@ fn parse_backend_error_body(body_text: &str) -> BackendErrorBody {
         return BackendErrorBody { code: None, message: None };
     }
 
-    if let Ok(parsed) = serde_json::from_str::<BackendErrorBody>(trimmed) {
-        if parsed.code.is_some() || parsed.message.is_some() {
-            return parsed;
-        }
+    if let Ok(parsed) = serde_json::from_str::<BackendErrorBody>(trimmed)
+        && (parsed.code.is_some() || parsed.message.is_some())
+    {
+        return parsed;
     }
 
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
@@ -582,7 +582,7 @@ fn classify_backend_error(status: u16, code: Option<i64>, message: &str) -> ApiE
     if status == 407 || normalized.contains("proxy") {
         return ApiErrorKind::ProxyConfiguration;
     }
-    if status >= 400 && status < 500 {
+    if (400..500).contains(&status) {
         return ApiErrorKind::ServerRejected;
     }
     if status >= 500 {

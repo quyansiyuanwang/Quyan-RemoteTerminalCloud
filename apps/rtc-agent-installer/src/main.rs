@@ -224,11 +224,11 @@ fn default_windows_install_root() -> String {
 fn managed_logs_dir() -> String {
     #[cfg(target_os = "windows")]
     {
-        return std::env::var("ProgramData")
+        std::env::var("ProgramData")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| r"C:\ProgramData".into())
-            + r"\RemoteTerminalCloudAgent\logs";
+            + r"\RemoteTerminalCloudAgent\logs"
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -274,6 +274,7 @@ fn stop_service_with_cleanup(install_root: &str, as_json: bool) -> Result<()> {
                     // tasklist /FO CSV /NH output: "image.exe","pid","session","session#","mem"
                     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
                         let fields: Vec<&str> = line.trim_matches('"').split("\",\"").collect();
+                        #[allow(clippy::collapsible_if)]
                         if fields.len() >= 2 {
                             if let Ok(pid) = fields[1].trim().parse::<u32>() {
                                 // check executable path via wmic to avoid killing unrelated processes
@@ -301,8 +302,6 @@ fn stop_service_with_cleanup(install_root: &str, as_json: bool) -> Result<()> {
                 }
             }
         }
-
-        // Step 4: wait again for service to fully stop (15s timeout)
         let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             match service::query_service_state() {
@@ -312,7 +311,7 @@ fn stop_service_with_cleanup(install_root: &str, as_json: bool) -> Result<()> {
         }
 
         let status = service::service_status();
-        return emit_service_result(status, as_json);
+        emit_service_result(status, as_json)
     }
 
     #[cfg(not(target_os = "windows"))]

@@ -69,33 +69,30 @@ fn dotenv_candidates() -> Vec<PathBuf> {
 pub fn default_config_file_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(appdata) = env::var("APPDATA") {
-            if !appdata.trim().is_empty() {
-                return PathBuf::from(appdata)
-                    .join("remote-terminal-cloud-agent")
-                    .join("config.json");
-            }
+        if let Ok(appdata) = env::var("APPDATA")
+            && !appdata.trim().is_empty()
+        {
+            return PathBuf::from(appdata).join("remote-terminal-cloud-agent").join("config.json");
         }
         let roaming = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        return roaming.join("remote-terminal-cloud-agent").join("config.json");
+        roaming.join("remote-terminal-cloud-agent").join("config.json")
     }
     #[cfg(target_os = "macos")]
     {
         let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        return base
-            .join("Library")
+        base.join("Library")
             .join("Application Support")
             .join("remote-terminal-cloud-agent")
-            .join("config.json");
+            .join("config.json")
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        if let Ok(config_home) = env::var("XDG_CONFIG_HOME") {
-            if !config_home.trim().is_empty() {
-                return PathBuf::from(config_home)
-                    .join("remote-terminal-cloud-agent")
-                    .join("config.json");
-            }
+        if let Ok(config_home) = env::var("XDG_CONFIG_HOME")
+            && !config_home.trim().is_empty()
+        {
+            return PathBuf::from(config_home)
+                .join("remote-terminal-cloud-agent")
+                .join("config.json");
         }
         let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         base.join("remote-terminal-cloud-agent").join("config.json")
@@ -105,33 +102,32 @@ pub fn default_config_file_path() -> PathBuf {
 pub fn default_preferences_file_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(appdata) = env::var("APPDATA") {
-            if !appdata.trim().is_empty() {
-                return PathBuf::from(appdata)
-                    .join("remote-terminal-cloud-agent")
-                    .join("preferences.json");
-            }
+        if let Ok(appdata) = env::var("APPDATA")
+            && !appdata.trim().is_empty()
+        {
+            return PathBuf::from(appdata)
+                .join("remote-terminal-cloud-agent")
+                .join("preferences.json");
         }
         let roaming = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        return roaming.join("remote-terminal-cloud-agent").join("preferences.json");
+        roaming.join("remote-terminal-cloud-agent").join("preferences.json")
     }
     #[cfg(target_os = "macos")]
     {
         let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        return base
-            .join("Library")
+        base.join("Library")
             .join("Application Support")
             .join("remote-terminal-cloud-agent")
-            .join("preferences.json");
+            .join("preferences.json")
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        if let Ok(state_home) = env::var("XDG_STATE_HOME") {
-            if !state_home.trim().is_empty() {
-                return PathBuf::from(state_home)
-                    .join("remote-terminal-cloud-agent")
-                    .join("preferences.json");
-            }
+        if let Ok(state_home) = env::var("XDG_STATE_HOME")
+            && !state_home.trim().is_empty()
+        {
+            return PathBuf::from(state_home)
+                .join("remote-terminal-cloud-agent")
+                .join("preferences.json");
         }
         let base = dirs::state_dir().unwrap_or_else(|| PathBuf::from("."));
         base.join("remote-terminal-cloud-agent").join("preferences.json")

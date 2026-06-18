@@ -351,10 +351,10 @@ impl ShellSession {
         }
         // If spawn_waiter already took the child, kill() is a no-op — that's fine,
         // the child will exit naturally once the PTY master is dropped.
-        if let Ok(mut guard) = self.child.lock() {
-            if let Some(ref mut c) = *guard {
-                let _ = c.kill();
-            }
+        if let Ok(mut guard) = self.child.lock()
+            && let Some(ref mut c) = *guard
+        {
+            let _ = c.kill();
         }
     }
 }
@@ -458,7 +458,7 @@ fn resolve_shell_launch(requested: ShellType, default_shell: ShellType) -> Resul
 
     #[cfg(target_os = "windows")]
     {
-        return match normalized {
+        match normalized {
             ShellType::SystemDefault | ShellType::Cmd => {
                 let executable = std::env::var("ComSpec")
                     .ok()
@@ -491,12 +491,12 @@ fn resolve_shell_launch(requested: ShellType, default_shell: ShellType) -> Resul
                 shell_type: ShellType::Pwsh,
             }),
             _ => Err(anyhow!("shell is not supported on Windows")),
-        };
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        return match normalized {
+        match normalized {
             ShellType::SystemDefault => {
                 let executable = std::env::var("SHELL")
                     .ok()
@@ -519,7 +519,7 @@ fn resolve_shell_launch(requested: ShellType, default_shell: ShellType) -> Resul
                 shell_type: ShellType::Pwsh,
             }),
             _ => Err(anyhow!("shell is not supported on this platform")),
-        };
+        }
     }
 }
 
@@ -543,7 +543,7 @@ fn root_browse_result() -> Result<DirectoryBrowseResultMessage> {
             .collect::<Vec<_>>();
         items.sort_by_key(|entry| entry.name.to_ascii_lowercase());
 
-        return Ok(DirectoryBrowseResultMessage {
+        Ok(DirectoryBrowseResultMessage {
             r#type: "directory-browse-result".into(),
             request_id: String::new(),
             ok: true,
@@ -551,7 +551,7 @@ fn root_browse_result() -> Result<DirectoryBrowseResultMessage> {
             current_path: "/".into(),
             parent_path: String::new(),
             items,
-        });
+        })
     }
 
     #[cfg(target_os = "windows")]
@@ -567,7 +567,7 @@ fn root_browse_result() -> Result<DirectoryBrowseResultMessage> {
             }
         }
 
-        return Ok(DirectoryBrowseResultMessage {
+        Ok(DirectoryBrowseResultMessage {
             r#type: "directory-browse-result".into(),
             request_id: String::new(),
             ok: true,
@@ -575,6 +575,6 @@ fn root_browse_result() -> Result<DirectoryBrowseResultMessage> {
             current_path: String::new(),
             parent_path: String::new(),
             items,
-        });
+        })
     }
 }

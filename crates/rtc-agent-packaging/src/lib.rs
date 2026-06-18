@@ -474,7 +474,7 @@ fn windows_desktop_bundle_command(
 
     let mut tauri = Command::new(node_package_manager_command());
     tauri
-        .current_dir(&desktop_dir.join("src-tauri"))
+        .current_dir(desktop_dir.join("src-tauri"))
         .arg("run")
         .arg("tauri")
         .arg("--")
@@ -790,7 +790,7 @@ fn validate_release_server_url(
 ) -> Result<()> {
     let mut cmd = Command::new(binary_path);
     cmd.arg("version").arg("--json");
-    apply_build_env(&mut cmd, &ctx);
+    apply_build_env(&mut cmd, ctx);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let output = cmd
         .output()
@@ -807,7 +807,7 @@ fn validate_release_server_url(
     let payload: Value = serde_json::from_slice(&output.stdout)
         .with_context(|| format!("decode {label} version JSON from {}", binary_path.display()))?;
     let actual = payload.get("serverBaseUrl").and_then(Value::as_str).unwrap_or_default();
-    let expected = compiled_server_base_url(&ctx);
+    let expected = compiled_server_base_url(ctx);
     if actual != expected {
         bail!("{label} compiled with unexpected server base URL `{actual}`; expected `{expected}`");
     }

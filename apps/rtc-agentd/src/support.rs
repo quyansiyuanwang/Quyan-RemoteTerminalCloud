@@ -36,7 +36,7 @@ pub fn managed_logs_dir() -> PathBuf {
             .filter(|value| !value.trim().is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
-        return base.join("RemoteTerminalCloudAgent").join("logs");
+        base.join("RemoteTerminalCloudAgent").join("logs")
     }
     #[cfg(not(target_os = "windows"))]
     {
