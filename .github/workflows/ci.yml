@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 permissions:
@@ -25,8 +26,8 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
-  clippy:
-    name: Clippy
+  check:
+    name: Cargo check & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/ci.yml') }}
+          key: apt-tauri-${{ runner.arch }}
       - name: Install system deps
         run: |
           sudo apt-get install -y --no-install-recommends \
@@ -47,24 +48,4 @@ jobs:
             librsvg2-dev \
             patchelf
       - run: cargo clippy --workspace -- -D warnings
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/ci.yml') }}
-      - name: Install system deps
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
       - run: cargo test --workspace --no-fail-fast
