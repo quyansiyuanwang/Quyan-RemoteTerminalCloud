@@ -26,7 +26,7 @@ jobs:
       - run: cargo fmt --check
 
   check:
-    name: Clippy + Test
+    name: Cargo check & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +34,11 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt
+          key: apt-tauri-${{ runner.arch }}
       - name: Install system deps
         run: |
           sudo apt-get install -y --no-install-recommends \
