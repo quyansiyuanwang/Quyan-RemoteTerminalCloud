@@ -220,6 +220,7 @@ fn main() -> Result<()> {
         }
         Command::Shells(flag) | Command::Shell(flag) => run_shells(flag.json),
         Command::Run => {
+            warn_if_service_running();
             let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
             runtime.block_on(run_agent_forever())
         }
@@ -551,15 +552,16 @@ fn run_shells(as_json: bool) -> Result<()> {
 fn run_service(args: ServiceArgs) -> Result<()> {
     let action = args.action.unwrap_or_else(|| "status".into());
     let value = args.value.unwrap_or_default();
+    let install_root = detect_install_root();
     let result = match action.as_str() {
         "install" => service::install_service(
-            "",
+            &install_root,
             if value.trim().is_empty() { None } else { Some(value.as_str()) },
         )?,
-        "uninstall" => service::uninstall_service("")?,
+        "uninstall" => service::uninstall_service(&install_root)?,
         "start" => service::start_service()?,
-        "stop" => service::stop_service("")?,
-        "restart" => service::restart_service("")?,
+        "stop" => service::stop_service(&install_root)?,
+        "restart" => service::restart_service(&install_root)?,
         "status" => service::service_status(),
         other => bail!("unknown service action: {other}"),
     };
@@ -569,6 +571,16 @@ fn run_service(args: ServiceArgs) -> Result<()> {
         println!("{}", result.message);
         Ok(())
     }
+}
+
+fn detect_install_root() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.display().to_string())
+        })
+        .unwrap_or_else(|| ".".into())
 }
 
 async fn run_verify(as_json: bool) -> Result<()> {
@@ -679,15 +691,42 @@ async fn run_verify(as_json: bool) -> Result<()> {
 }
 
 async fn run_agent_forever() -> Result<()> {
+    let mut retry_attempt = 0_u32;
     loop {
         if let Err(err) = run_agent_once().await {
+            retry_attempt = retry_attempt.saturating_add(1);
+            let delay = compute_retry_delay(retry_attempt);
             print_runtime_error("[remote-terminal-cloud-agent] runtime error", &err);
             eprintln!(
-                "[remote-terminal-cloud-agent] the agent will retry automatically in {} seconds.",
-                RUNTIME_RETRY_INTERVAL.as_secs()
+                "[remote-terminal-cloud-agent] the agent will retry automatically in {} seconds (attempt {}).",
+                delay.as_secs(),
+                retry_attempt
             );
-            tokio::time::sleep(RUNTIME_RETRY_INTERVAL).await;
+            tokio::time::sleep(delay).await;
+        } else {
+            retry_attempt = 0;
         }
+    }
+}
+
+fn compute_retry_delay(retry_attempt: u32) -> Duration {
+    let capped = retry_attempt.min(5);
+    let secs = RUNTIME_RETRY_INTERVAL.as_secs().saturating_mul(1_u64 << capped);
+    Duration::from_secs(secs.min(MAX_BACKOFF_INTERVAL.as_secs()))
+}
+
+/// Warns if the system service is currently running, since the foreground
+/// agent will conflict with it.
+fn warn_if_service_running() {
+    let status = service::service_status();
+    let text = status.message.to_ascii_lowercase();
+    if status.ok && (text.contains("running") || text.contains("loaded")) {
+        eprintln!(
+            "[remote-terminal-cloud-agent] warning: the background service appears to be running.\n\
+             [remote-terminal-cloud-agent] running the agent in the foreground while the service\n\
+             [remote-terminal-cloud-agent] is active may cause duplicate connections.\n\
+             [remote-terminal-cloud-agent] stop it first with: rtc-agent service stop"
+        );
     }
 }
 

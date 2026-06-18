@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -100,10 +101,9 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
             Ok(())
         }
         "start" | "start-service" => emit_service_result(service::start_service()?, args.json),
-        "stop" | "stop-service" => emit_service_result(
-            service::stop_service(&install_root)?,
-            args.json,
-        ),
+        "stop" | "stop-service" => {
+            stop_service_with_cleanup(&install_root, args.json)
+        }
         "restart" | "restart-service" => emit_service_result(
             service::restart_service(&install_root)?,
             args.json,
@@ -250,4 +250,83 @@ fn emit_service_result(result: service::ServiceActionResult, as_json: bool) -> R
         println!("{}", result.message);
     }
     Ok(())
+}
+
+fn stop_service_with_cleanup(install_root: &str, as_json: bool) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+
+        // Step 1: stop the native service
+        let _ = Command::new("sc")
+            .args(["stop", service::WINDOWS_SERVICE_NAME])
+            .status();
+
+        // Step 2: wait for service to reach Stopped / Missing (30s timeout)
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            match service::query_service_state() {
+                service::ServiceState::Stopped | service::ServiceState::Missing => break,
+                _ => std::thread::sleep(Duration::from_millis(500)),
+            }
+        }
+
+        // Step 3: kill any lingering agent processes under the install root
+        let root_upper = install_root.trim().to_ascii_uppercase();
+        if !root_upper.is_empty() {
+            for process_name in &["rtc-agent.exe", "rtc-agentd.exe"] {
+                if let Ok(output) = Command::new("tasklist")
+                    .args(["/FI", &format!("IMAGENAME eq {process_name}"), "/FO", "CSV", "/NH"])
+                    .output()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    // tasklist /FO CSV /NH output: "image.exe","pid","session","session#","mem"
+                    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+                        let fields: Vec<&str> = line.trim_matches('"').split("\",\"").collect();
+                        if fields.len() >= 2 {
+                            if let Ok(pid) = fields[1].trim().parse::<u32>() {
+                                // check executable path via wmic to avoid killing unrelated processes
+                                if let Ok(wmic_output) = Command::new("wmic")
+                                    .args([
+                                        "process",
+                                        "where",
+                                        &format!("processid={pid}"),
+                                        "get",
+                                        "executablepath",
+                                        "/format:value",
+                                    ])
+                                    .output()
+                                {
+                                    let wmic_text = String::from_utf8_lossy(&wmic_output.stdout);
+                                    if wmic_text.to_ascii_uppercase().contains(&root_upper) {
+                                        let _ = Command::new("taskkill")
+                                            .args(["/F", "/PID", &pid.to_string()])
+                                            .status();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 4: wait again for service to fully stop (15s timeout)
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline {
+            match service::query_service_state() {
+                service::ServiceState::Stopped | service::ServiceState::Missing => break,
+                _ => std::thread::sleep(Duration::from_millis(500)),
+            }
+        }
+
+        let status = service::service_status();
+        return emit_service_result(status, as_json);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let result = service::stop_service(install_root)?;
+        emit_service_result(result, as_json)
+    }
 }

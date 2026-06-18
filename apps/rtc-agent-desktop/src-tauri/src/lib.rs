@@ -362,7 +362,7 @@ async fn ensure_agent_started(
     }
 
     let service_state = service::service_status();
-    if looks_like_service_running(&service_state.message) {
+    if looks_like_service_running(&service_state) {
         bail!(
             "Background service appears to be active. Stop the service before using desktop background mode to avoid duplicate agent connections."
         );
@@ -1181,8 +1181,15 @@ fn token_state() -> (bool, String) {
     (false, "none".into())
 }
 
-fn looks_like_service_running(message: &str) -> bool {
-    let text = message.to_ascii_lowercase();
+fn looks_like_service_running(result: &service::ServiceActionResult) -> bool {
+    if !result.ok {
+        return false;
+    }
+    let text = result.message.to_ascii_lowercase();
+    // Platform-specific checks for the "running" state.
+    // sc query -> STATE : 4 RUNNING
+    // launchctl print -> state = running
+    // systemctl status -> Active: active (running)
     text.contains("running") && !text.contains("pending")
 }
 
@@ -1199,7 +1206,11 @@ fn is_autostart_enabled() -> bool {
     {
         return macos_autostart_plist_path().exists();
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        linux_autostart_desktop_file_path().exists()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         false
     }
@@ -1244,7 +1255,26 @@ fn enable_autostart() -> Result<()> {
         fs::write(&plist_path, plist).context("write LaunchAgent plist")?;
         return Ok(());
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        let exe = env::current_exe().context("resolve current desktop executable")?;
+        let desktop_path = linux_autostart_desktop_file_path();
+        if let Some(parent) = desktop_path.parent() {
+            fs::create_dir_all(parent).context("create XDG autostart directory")?;
+        }
+        let content = format!(
+            r#"[Desktop Entry]
+Type=Application
+Name=Remote Terminal Cloud Agent
+Exec={exe}
+X-GNOME-Autostart-enabled=true
+"#,
+            exe = exe.display()
+        );
+        fs::write(&desktop_path, content).context("write XDG autostart desktop file")?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         bail!("autostart management is currently implemented for Windows and macOS only")
     }
@@ -1271,7 +1301,15 @@ fn disable_autostart() -> Result<()> {
         }
         return Ok(());
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        let desktop_path = linux_autostart_desktop_file_path();
+        if desktop_path.exists() {
+            fs::remove_file(&desktop_path).context("remove XDG autostart desktop file")?;
+        }
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         bail!("autostart management is currently implemented for Windows and macOS only")
     }
@@ -1281,6 +1319,12 @@ fn disable_autostart() -> Result<()> {
 fn macos_autostart_plist_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| ".".into());
     Path::new(&home).join("Library/LaunchAgents/com.remote-terminal-cloud.agent.desktop.plist")
+}
+
+#[cfg(target_os = "linux")]
+fn linux_autostart_desktop_file_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".into());
+    Path::new(&home).join(".config/autostart/remote-terminal-cloud-agent.desktop")
 }
 
 #[cfg(target_os = "windows")]

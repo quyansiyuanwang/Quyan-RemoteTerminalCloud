@@ -40,7 +40,6 @@
 
     <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent.exe" />
-      <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-manager.exe" />
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-desktop.exe" />
       <Files Include="$(var.AgentBuildRoot)\bin\rtc-agent-installer.exe" />
     </ComponentGroup>

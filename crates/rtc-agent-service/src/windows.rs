@@ -12,6 +12,41 @@ use rtc_agent_config::{default_config_file_path, persist_registration_token};
 use crate::{ServiceActionResult, WINDOWS_SERVICE_NAME};
 
 #[cfg(target_os = "windows")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServiceState {
+    Running,
+    Stopped,
+    Missing,
+    Unknown(String),
+}
+
+#[cfg(target_os = "windows")]
+pub fn query_service_state() -> ServiceState {
+    let output = Command::new("sc")
+        .args(["query", WINDOWS_SERVICE_NAME])
+        .output();
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let text = if !stdout.trim().is_empty() { stdout } else { stderr };
+
+            if text.contains("FAILED 1060") || text.contains("service does not exist") || text.contains("not installed") {
+                return ServiceState::Missing;
+            }
+            if text.contains("STOPPED") || text.contains("stopped") {
+                return ServiceState::Stopped;
+            }
+            if text.contains("RUNNING") || text.contains("running") {
+                return ServiceState::Running;
+            }
+            ServiceState::Unknown(text.trim().to_owned())
+        }
+        Err(_) => ServiceState::Unknown("failed to query service".into()),
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn service_status() -> ServiceActionResult {
     let output = Command::new("sc")
         .args(["query", WINDOWS_SERVICE_NAME])

@@ -120,17 +120,17 @@ pub fn start_service() -> Result<ServiceActionResult> {
 #[cfg(target_os = "macos")]
 pub fn stop_service() -> Result<ServiceActionResult> {
     let status = Command::new("launchctl")
-        .args(["bootout", "system", MACOS_PLIST_PATH])
+        .args(["disable", &format!("system/{MACOS_SERVICE_LABEL}")])
         .status()
-        .context("failed to execute launchctl bootout")?;
+        .context("failed to execute launchctl disable")?;
     if status.success() {
         Ok(ServiceActionResult {
             action: "stop".into(),
             ok: true,
-            message: format!("launchd service '{MACOS_SERVICE_LABEL}' stopped"),
+            message: format!("launchd service '{MACOS_SERVICE_LABEL}' stopped (disabled)"),
         })
     } else {
-        bail!("launchctl bootout failed");
+        bail!("launchctl disable failed");
     }
 }
 

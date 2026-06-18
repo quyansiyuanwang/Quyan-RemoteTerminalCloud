@@ -17,14 +17,13 @@ The default Windows install path is now:
 
 The agent server address is built into release binaries as `https://api.qysyw.cn`. The default `config.json` template only leaves `registrationToken` empty.
 
-## Optional service mode
-
-Windows service mode is no longer the default packaging path.
+## Service mode
 
 - `rtc-agentd.exe service-host` is the native Windows Service entrypoint used by `rtc-agent-installer` and `rtc-agentd service install`
-- `RemoteTerminalCloudAgentService.xml` remains only as legacy compatibility material
-- the default package does not include a service wrapper
-- compatibility `start` / `stop` commands now prefer the registered Windows Service and only fall back when service control is unavailable
+- The legacy WinSW service wrapper has been removed — all service operations now use native `sc.exe` via the `windows-service` Rust crate
+- Use `rtc-agent-installer windows install [root] [token]` to install the service
+- Use `rtc-agent-installer windows stop` / `start` / `restart` / `uninstall` to manage it
+- `manage-agent.ps1` provides an interactive management menu using native PowerShell cmdlets
 
 ## Files
 

@@ -81,7 +81,6 @@ Section "Main" SecMain
 
   SetOutPath "$INSTDIR\bin"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent.exe"
-  File "${AGENT_BUILD_ROOT}\bin\rtc-agent-manager.exe"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent-desktop.exe"
   File "${AGENT_BUILD_ROOT}\bin\rtc-agent-installer.exe"
 
