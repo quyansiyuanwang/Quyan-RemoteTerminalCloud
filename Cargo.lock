@@ -3385,6 +3385,7 @@ dependencies = [
  "hostname",
  "rtc-agent-protocol",
  "serde",
+ "serde_json",
  "tokio",
  "which",
 ]
@@ -3404,6 +3405,7 @@ name = "rtc-agent-protocol"
 version = "0.6.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]

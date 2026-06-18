@@ -75,7 +75,9 @@ pub fn run_start() -> Result<()> {
         std::fs::create_dir_all(&logs_dir).ok();
         let stdout_log = logs_dir.join("rtc-agent.log");
         let stdout_file = std::fs::OpenOptions::new()
-            .create(true).append(true).open(&stdout_log)
+            .create(true)
+            .append(true)
+            .open(&stdout_log)
             .context("open stdout log")?;
         let stderr_file = stdout_file.try_clone().context("clone log fd")?;
         let child = std::process::Command::new(&exe)
@@ -143,13 +145,13 @@ pub fn run_stop() -> Result<()> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let status = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status();
+        let status = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).status();
         match status {
             Ok(s) if s.success() => {}
             Ok(_) => {
-                println!("[remote-terminal-cloud-agent] process {pid} not found, cleaning up pid file");
+                println!(
+                    "[remote-terminal-cloud-agent] process {pid} not found, cleaning up pid file"
+                );
             }
             Err(e) => bail!("kill failed: {e}"),
         }
@@ -219,7 +221,8 @@ fn windows_unregister_path(bin_dir: &std::path::Path) -> Result<()> {
         .output()
         .context("reg query failed")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let current_path = stdout.lines()
+    let current_path = stdout
+        .lines()
         .find(|l| l.trim_start().starts_with("Path"))
         .map(|l| {
             let parts: Vec<&str> = l.splitn(4, "    ").filter(|s| !s.is_empty()).collect();
@@ -228,17 +231,30 @@ fn windows_unregister_path(bin_dir: &std::path::Path) -> Result<()> {
         .unwrap_or_default();
 
     if !current_path.to_lowercase().contains(&bin_str.to_lowercase()) {
-        println!("[remote-terminal-cloud-agent] PATH does not contain {bin_str}, nothing to remove");
+        println!(
+            "[remote-terminal-cloud-agent] PATH does not contain {bin_str}, nothing to remove"
+        );
         return Ok(());
     }
 
-    let new_path: String = current_path.split(';')
+    let new_path: String = current_path
+        .split(';')
         .filter(|seg| !seg.eq_ignore_ascii_case(&bin_str))
         .collect::<Vec<_>>()
         .join(";");
 
     let status = std::process::Command::new("reg")
-        .args(["add", r"HKCU\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", &new_path, "/f"])
+        .args([
+            "add",
+            r"HKCU\Environment",
+            "/v",
+            "Path",
+            "/t",
+            "REG_EXPAND_SZ",
+            "/d",
+            &new_path,
+            "/f",
+        ])
         .status()
         .context("reg add failed")?;
     if !status.success() {
@@ -257,7 +273,8 @@ fn windows_register_path(bin_dir: &std::path::Path) -> Result<()> {
         .output()
         .context("reg query failed")?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let current_path = stdout.lines()
+    let current_path = stdout
+        .lines()
         .find(|l| l.trim_start().starts_with("Path"))
         .map(|l| {
             let parts: Vec<&str> = l.splitn(4, "    ").filter(|s| !s.is_empty()).collect();
@@ -277,7 +294,17 @@ fn windows_register_path(bin_dir: &std::path::Path) -> Result<()> {
     };
 
     let status = std::process::Command::new("reg")
-        .args(["add", r"HKCU\Environment", "/v", "Path", "/t", "REG_EXPAND_SZ", "/d", &new_path, "/f"])
+        .args([
+            "add",
+            r"HKCU\Environment",
+            "/v",
+            "Path",
+            "/t",
+            "REG_EXPAND_SZ",
+            "/d",
+            &new_path,
+            "/f",
+        ])
         .status()
         .context("reg add failed")?;
     if !status.success() {
@@ -298,10 +325,15 @@ fn unix_unregister_path(bin_dir: &std::path::Path) -> Result<()> {
     let candidates: &[&str] = &[".zshrc", ".bashrc", ".bash_profile", ".profile"];
     for rc in candidates {
         let path = PathBuf::from(&home).join(rc);
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         let contents = std::fs::read_to_string(&path).unwrap_or_default();
-        if !contents.contains(bin_str.as_ref()) { continue; }
-        let new_contents: String = contents.lines()
+        if !contents.contains(bin_str.as_ref()) {
+            continue;
+        }
+        let new_contents: String = contents
+            .lines()
             .filter(|l| !l.contains(bin_str.as_ref()))
             .map(|l| format!("{l}\n"))
             .collect();
@@ -333,8 +365,12 @@ fn unix_register_path(bin_dir: &std::path::Path) -> Result<()> {
                 continue;
             }
             std::fs::OpenOptions::new()
-                .append(true).open(&path)
-                .and_then(|mut f| { use std::io::Write; f.write_all(export_line.as_bytes()) })
+                .append(true)
+                .open(&path)
+                .and_then(|mut f| {
+                    use std::io::Write;
+                    f.write_all(export_line.as_bytes())
+                })
                 .with_context(|| format!("write to ~/{rc}"))?;
             println!("[remote-terminal-cloud-agent] appended PATH entry to ~/{rc}");
             wrote_any = true;
@@ -345,8 +381,13 @@ fn unix_register_path(bin_dir: &std::path::Path) -> Result<()> {
     let profile_contents = std::fs::read_to_string(&profile).unwrap_or_default();
     if !profile_contents.contains(bin_str.as_ref()) {
         std::fs::OpenOptions::new()
-            .create(true).append(true).open(&profile)
-            .and_then(|mut f| { use std::io::Write; f.write_all(export_line.as_bytes()) })
+            .create(true)
+            .append(true)
+            .open(&profile)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(export_line.as_bytes())
+            })
             .context("write to ~/.profile")?;
         println!("[remote-terminal-cloud-agent] appended PATH entry to ~/.profile");
         wrote_any = true;

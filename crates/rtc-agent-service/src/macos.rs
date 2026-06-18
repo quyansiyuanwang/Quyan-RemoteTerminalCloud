@@ -36,7 +36,9 @@ pub fn service_status() -> ServiceActionResult {
                 ServiceActionResult {
                     action: "status".into(),
                     ok: true,
-                    message: format!("launchd service '{MACOS_SERVICE_LABEL}' is not installed (pending)"),
+                    message: format!(
+                        "launchd service '{MACOS_SERVICE_LABEL}' is not installed (pending)"
+                    ),
                 }
             } else {
                 ServiceActionResult {
@@ -81,9 +83,7 @@ pub fn install_service(install_root: &str) -> Result<ServiceActionResult> {
 
 #[cfg(target_os = "macos")]
 pub fn uninstall_service() -> Result<ServiceActionResult> {
-    let bootout = Command::new("launchctl")
-        .args(["bootout", "system", MACOS_PLIST_PATH])
-        .status();
+    let bootout = Command::new("launchctl").args(["bootout", "system", MACOS_PLIST_PATH]).status();
     if let Err(e) = bootout {
         if Path::new(MACOS_PLIST_PATH).exists() {
             fs::remove_file(MACOS_PLIST_PATH)?;

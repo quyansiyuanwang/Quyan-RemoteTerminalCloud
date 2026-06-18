@@ -101,24 +101,17 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
             Ok(())
         }
         "start" | "start-service" => emit_service_result(service::start_service()?, args.json),
-        "stop" | "stop-service" => {
-            stop_service_with_cleanup(&install_root, args.json)
+        "stop" | "stop-service" => stop_service_with_cleanup(&install_root, args.json),
+        "restart" | "restart-service" => {
+            emit_service_result(service::restart_service(&install_root)?, args.json)
         }
-        "restart" | "restart-service" => emit_service_result(
-            service::restart_service(&install_root)?,
-            args.json,
-        ),
         "install" | "install-service" => emit_service_result(
-            service::install_service(
-                &install_root,
-                args.token.as_deref(),
-            )?,
+            service::install_service(&install_root, args.token.as_deref())?,
             args.json,
         ),
-        "uninstall" | "uninstall-service" => emit_service_result(
-            service::uninstall_service(&install_root)?,
-            args.json,
-        ),
+        "uninstall" | "uninstall-service" => {
+            emit_service_result(service::uninstall_service(&install_root)?, args.json)
+        }
         "open-config-dir" => {
             let path = default_config_file_path();
             if let Some(parent) = path.parent() {
@@ -258,9 +251,7 @@ fn stop_service_with_cleanup(install_root: &str, as_json: bool) -> Result<()> {
         use std::process::Command;
 
         // Step 1: stop the native service
-        let _ = Command::new("sc")
-            .args(["stop", service::WINDOWS_SERVICE_NAME])
-            .status();
+        let _ = Command::new("sc").args(["stop", service::WINDOWS_SERVICE_NAME]).status();
 
         // Step 2: wait for service to reach Stopped / Missing (30s timeout)
         let deadline = Instant::now() + Duration::from_secs(30);

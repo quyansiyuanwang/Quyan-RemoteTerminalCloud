@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -396,10 +396,7 @@ fn macos_user_shell_env() -> &'static [(String, String)] {
 #[cfg(target_os = "macos")]
 fn load_macos_user_shell_env() -> Vec<(String, String)> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let Ok(output) = std::process::Command::new(&shell)
-        .args(["-l", "-c", "env"])
-        .output()
-    else {
+    let Ok(output) = std::process::Command::new(&shell).args(["-l", "-c", "env"]).output() else {
         return Vec::new();
     };
     if !output.status.success() {

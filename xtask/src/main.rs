@@ -4,7 +4,9 @@ use std::process::{Command as ProcessCommand, Stdio};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
-use rtc_agent_packaging::{BuildProfile, PackagingCommand, resolve_context_for_profile, run_packaging_command_for_profile};
+use rtc_agent_packaging::{
+    BuildProfile, PackagingCommand, resolve_context_for_profile, run_packaging_command_for_profile,
+};
 use serde_json::Value;
 
 #[derive(Parser)]
@@ -20,6 +22,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run CI checks locally: fmt, clippy, test
+    Ci,
     Build,
     Bundle,
     Artifact,
@@ -55,6 +59,11 @@ fn main() -> Result<()> {
     let ctx = resolve_context_for_profile(build_profile)?;
 
     let result = match cli.command {
+        Command::Ci => {
+            let result = run_ci(&ctx.project_root)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
         Command::Build => PackagingCommand::Build,
         Command::Bundle => PackagingCommand::Bundle,
         Command::Artifact => PackagingCommand::Artifact,
@@ -74,6 +83,28 @@ fn main() -> Result<()> {
     let result = run_packaging_command_for_profile(result, build_profile)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
+}
+
+fn run_ci(project_root: &Path) -> Result<Value> {
+    println!("═══ cargo fmt --check ═══");
+    run_command(project_root, "cargo", &["fmt", "--check"], "fmt check failed")?;
+
+    println!("\n═══ cargo clippy --workspace -- -D warnings ═══");
+    run_command(
+        project_root,
+        "cargo",
+        &["clippy", "--workspace", "--", "-D", "warnings"],
+        "clippy failed",
+    )?;
+
+    println!("\n═══ cargo test --workspace --no-fail-fast ═══");
+    run_command(project_root, "cargo", &["test", "--workspace", "--no-fail-fast"], "tests failed")?;
+
+    Ok(serde_json::json!({
+        "command": "ci",
+        "ok": true,
+        "message": "All CI checks passed: fmt, clippy, test.",
+    }))
 }
 
 fn set_version(project_root: &Path, version: &str) -> Result<Value> {
@@ -202,10 +233,7 @@ fn run_command(workdir: &Path, program: &str, args: &[&str], error_message: &str
     let mut cmd = ProcessCommand::new(program);
     cmd.current_dir(workdir).args(args).stdout(Stdio::inherit()).stderr(Stdio::inherit());
     let status = cmd.status().with_context(|| {
-        format!(
-            "{error_message}: failed to start `{program}` in {}",
-            workdir.display()
-        )
+        format!("{error_message}: failed to start `{program}` in {}", workdir.display())
     })?;
     if !status.success() {
         bail!("{error_message}: exited with status {status}");

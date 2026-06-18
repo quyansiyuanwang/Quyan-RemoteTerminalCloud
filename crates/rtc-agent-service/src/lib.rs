@@ -15,7 +15,7 @@ pub use types::{
 };
 
 #[cfg(target_os = "windows")]
-pub use windows::{query_service_state, ServiceState};
+pub use windows::{ServiceState, query_service_state};
 
 pub fn service_status() -> ServiceActionResult {
     #[cfg(target_os = "windows")]

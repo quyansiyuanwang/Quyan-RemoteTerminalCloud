@@ -81,10 +81,7 @@ pub fn uninstall_service() -> Result<ServiceActionResult> {
         bail!("systemctl is required to uninstall the Linux service");
     }
 
-    Command::new("systemctl")
-        .args(["disable", "--now", LINUX_SYSTEMD_SERVICE_NAME])
-        .status()
-        .ok();
+    Command::new("systemctl").args(["disable", "--now", LINUX_SYSTEMD_SERVICE_NAME]).status().ok();
 
     Ok(ServiceActionResult {
         action: "uninstall".into(),

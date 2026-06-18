@@ -5,19 +5,16 @@ use std::fs;
 use std::os::windows::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use rtc_agent_config::{
     RuntimeConfig, default_config_file_path, default_server_base_url,
     has_registration_token_env_override, load_or_collect_device_fingerprint,
-    normalize_template_string, persist_registration_token, read_config_file,
-    read_runtime_config,
+    normalize_template_string, persist_registration_token, read_config_file, read_runtime_config,
 };
-use rtc_agent_platform::{
-    collect_host_snapshot, resolve_default_shell,
-};
+use rtc_agent_platform::{collect_host_snapshot, resolve_default_shell};
 use rtc_agent_preferences::PreferencesStore;
 use rtc_agent_protocol::ShellType;
 use rtc_agent_runtime::{ApiClient, describe_error, run_agent_tunnel_with_connect_hook};
@@ -222,7 +219,9 @@ impl DesktopState {
 }
 
 #[tauri::command]
-async fn desktop_bootstrap(state: State<'_, Arc<DesktopState>>) -> Result<BootstrapPayload, String> {
+async fn desktop_bootstrap(
+    state: State<'_, Arc<DesktopState>>,
+) -> Result<BootstrapPayload, String> {
     build_bootstrap_payload(state.as_ref()).await.map_err(|err| err.to_string())
 }
 
@@ -242,7 +241,8 @@ async fn save_token(
         return Err("Token cannot be empty.".into());
     }
 
-    persist_registration_token(&default_config_file_path(), &token).map_err(|err| err.to_string())?;
+    persist_registration_token(&default_config_file_path(), &token)
+        .map_err(|err| err.to_string())?;
     let result = SaveTokenResult {
         ok: true,
         config_file: Some(default_config_file_path().display().to_string()),
@@ -422,7 +422,10 @@ async fn restart_agent(app: &AppHandle, state: &DesktopState, force_restart: boo
 
 async fn reconcile_agent_state(state: &DesktopState) {
     if let Ok(mut agent) = state.agent.lock() {
-        if agent.task.is_none() && agent.desired_running && matches!(agent.runtime.phase, DesktopRuntimePhase::Idle) {
+        if agent.task.is_none()
+            && agent.desired_running
+            && matches!(agent.runtime.phase, DesktopRuntimePhase::Idle)
+        {
             agent.runtime.phase = DesktopRuntimePhase::Stopped;
         }
     }
@@ -532,7 +535,9 @@ fn build_status_payload() -> Result<StatusPayload> {
         ssh_available: snapshot.diagnostics.ssh_check.available,
         ssh_detail: snapshot.diagnostics.ssh_check.detail.clone(),
         platform: match snapshot.platform {
-            Some(platform) => serde_json::to_value(platform)?.as_str().unwrap_or("unknown").to_owned(),
+            Some(platform) => {
+                serde_json::to_value(platform)?.as_str().unwrap_or("unknown").to_owned()
+            }
             None => "unknown".into(),
         },
         arch: snapshot.arch,
@@ -582,10 +587,7 @@ async fn run_agent_supervisor(app: AppHandle, state: Arc<DesktopState>) {
                 &app,
                 &state,
                 "stderr",
-                format!(
-                    "[remote-terminal-cloud-agent] runtime error: {}",
-                    user_facing_error(&err)
-                ),
+                format!("[remote-terminal-cloud-agent] runtime error: {}", user_facing_error(&err)),
             );
             push_log_entry_and_emit(
                 &app,
@@ -638,10 +640,7 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         app,
         state.as_ref(),
         "stdout",
-        format!(
-            "[remote-terminal-cloud-agent] config file: {}",
-            config.config_file_path.display()
-        ),
+        format!("[remote-terminal-cloud-agent] config file: {}", config.config_file_path.display()),
     );
     push_log_entry_and_emit(
         app,
@@ -712,7 +711,10 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
                 app,
                 state.as_ref(),
                 "stderr",
-                format!("[remote-terminal-cloud-agent] registration failed: {}", user_facing_error(&err)),
+                format!(
+                    "[remote-terminal-cloud-agent] registration failed: {}",
+                    user_facing_error(&err)
+                ),
             );
             return Err(err);
         }
@@ -724,7 +726,8 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         format!(
             "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
             session.device_id,
-            &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
+            &device_fingerprint.device_fingerprint
+                [..12.min(device_fingerprint.device_fingerprint.len())]
         ),
     );
     update_runtime_snapshot(&state, |runtime| {
@@ -761,39 +764,40 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
         tasks.spawn(async move {
             let result: Result<()> = async {
                 loop {
-                tokio::time::sleep(Duration::from_secs(
-                    heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
-                ))
-                .await;
+                    tokio::time::sleep(Duration::from_secs(
+                        heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
+                    ))
+                    .await;
 
-                let heartbeat_snapshot = collect_host_snapshot(
-                    VERSION,
-                    &enabled_shell_types,
-                    logs_dir.display().to_string(),
-                )?;
-                heartbeat_session = api_client
-                    .send_heartbeat(&server_base_url, &heartbeat_session, heartbeat_snapshot)
-                    .await?;
-                update_runtime_snapshot(&state_ref, |runtime| {
-                    runtime.last_heartbeat_at = Some(format_rfc3339_now());
-                    runtime.retry_attempt = 0;
-                    runtime.connected = true;
-                    if runtime.websocket_url.is_some() {
-                        runtime.phase = DesktopRuntimePhase::Online;
-                    }
-                });
-                push_log_entry_and_emit(
-                    &app_handle,
-                    state_ref.as_ref(),
-                    "stdout",
-                    format!(
-                        "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
-                        heartbeat_session.device_id, heartbeat_session.heartbeat_interval_seconds
-                    ),
-                );
-                emit_agent_state(&app_handle, &state_ref).await;
-            }
-            #[allow(unreachable_code)]
+                    let heartbeat_snapshot = collect_host_snapshot(
+                        VERSION,
+                        &enabled_shell_types,
+                        logs_dir.display().to_string(),
+                    )?;
+                    heartbeat_session = api_client
+                        .send_heartbeat(&server_base_url, &heartbeat_session, heartbeat_snapshot)
+                        .await?;
+                    update_runtime_snapshot(&state_ref, |runtime| {
+                        runtime.last_heartbeat_at = Some(format_rfc3339_now());
+                        runtime.retry_attempt = 0;
+                        runtime.connected = true;
+                        if runtime.websocket_url.is_some() {
+                            runtime.phase = DesktopRuntimePhase::Online;
+                        }
+                    });
+                    push_log_entry_and_emit(
+                        &app_handle,
+                        state_ref.as_ref(),
+                        "stdout",
+                        format!(
+                            "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
+                            heartbeat_session.device_id,
+                            heartbeat_session.heartbeat_interval_seconds
+                        ),
+                    );
+                    emit_agent_state(&app_handle, &state_ref).await;
+                }
+                #[allow(unreachable_code)]
                 Ok(())
             }
             .await;
@@ -893,12 +897,10 @@ async fn run_agent_once_in_process(app: &AppHandle, state: Arc<DesktopState>) ->
                     runtime.connected = false;
                     runtime.websocket_url = None;
                     runtime.phase = DesktopRuntimePhase::Reconnecting;
-                    runtime.last_error = Some(
-                        format!(
-                            "{} disconnected. Reconnecting to the backend.",
-                            task_signal_label(signal)
-                        ),
-                    );
+                    runtime.last_error = Some(format!(
+                        "{} disconnected. Reconnecting to the backend.",
+                        task_signal_label(signal)
+                    ));
                 });
                 emit_agent_state(app, &state).await;
                 bail!("{} disconnected", task_signal_label(signal))
@@ -985,11 +987,7 @@ where
 }
 
 fn current_runtime_snapshot(state: &DesktopState) -> DesktopRuntimeSnapshot {
-    state
-        .agent
-        .lock()
-        .map(|agent| agent.runtime.clone())
-        .unwrap_or_default()
+    state.agent.lock().map(|agent| agent.runtime.clone()).unwrap_or_default()
 }
 
 fn task_signal_label(signal: TaskSignal) -> &'static str {
@@ -1028,9 +1026,7 @@ fn runtime_status_summary(
             runtime.retry_attempt.max(1),
             runtime.last_error.clone().unwrap_or_else(|| "请查看日志面板。".into())
         ),
-        DesktopRuntimePhase::WaitingConfig => {
-            "等待配置 Token。保存后桌面端会自动重试注册。".into()
-        }
+        DesktopRuntimePhase::WaitingConfig => "等待配置 Token。保存后桌面端会自动重试注册。".into(),
         DesktopRuntimePhase::Stopped => {
             if has_token {
                 "后台 Agent 已停止，可随时重新启动。".into()
@@ -1038,10 +1034,9 @@ fn runtime_status_summary(
                 "Token 是启动后台 Agent 的前提条件。".into()
             }
         }
-        DesktopRuntimePhase::Error => runtime
-            .last_error
-            .clone()
-            .unwrap_or_else(|| "后台 Agent 遇到错误，请查看日志。".into()),
+        DesktopRuntimePhase::Error => {
+            runtime.last_error.clone().unwrap_or_else(|| "后台 Agent 遇到错误，请查看日志。".into())
+        }
         DesktopRuntimePhase::Idle => {
             if running {
                 "Agent 进程已启动，正在等待连接状态更新。".into()
@@ -1051,9 +1046,7 @@ fn runtime_status_summary(
                 "Token is required before the background agent can start.".into()
             }
         }
-        DesktopRuntimePhase::Online => {
-            "Agent 已运行，正在等待最新连接状态。".into()
-        }
+        DesktopRuntimePhase::Online => "Agent 已运行，正在等待最新连接状态。".into(),
     }
 }
 
@@ -1101,11 +1094,7 @@ fn managed_logs_dir() -> PathBuf {
 }
 
 fn snapshot_logs(state: &DesktopState) -> Vec<AgentLogEntry> {
-    state
-        .logs
-        .lock()
-        .map(|logs| logs.iter().cloned().collect())
-        .unwrap_or_default()
+    state.logs.lock().map(|logs| logs.iter().cloned().collect()).unwrap_or_default()
 }
 
 fn push_log_entry(state: &DesktopState, entry: AgentLogEntry) {
@@ -1330,23 +1319,18 @@ fn linux_autostart_desktop_file_path() -> PathBuf {
 #[cfg(target_os = "windows")]
 fn windows_run_key() -> Result<RegKey> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    hkcu
-        .open_subkey_with_flags(
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            KEY_QUERY_VALUE,
-        )
+    hkcu.open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_QUERY_VALUE)
         .context("open Windows Run registry key")
 }
 
 #[cfg(target_os = "windows")]
 fn windows_run_key_write() -> Result<RegKey> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    hkcu
-        .open_subkey_with_flags(
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            KEY_SET_VALUE | KEY_QUERY_VALUE,
-        )
-        .context("open Windows Run registry key for write")
+    hkcu.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        KEY_SET_VALUE | KEY_QUERY_VALUE,
+    )
+    .context("open Windows Run registry key for write")
 }
 
 fn show_main_window(app: &AppHandle) -> Result<()> {
@@ -1439,11 +1423,8 @@ async fn handle_menu_event(app: AppHandle, state: Arc<DesktopState>, id: &str) {
             emit_agent_state(&app, &state).await;
         }
         MENU_OPEN_CONFIG => {
-            let path = default_config_file_path()
-                .parent()
-                .unwrap_or(Path::new("."))
-                .display()
-                .to_string();
+            let path =
+                default_config_file_path().parent().unwrap_or(Path::new(".")).display().to_string();
             let _ = open_path_in_file_manager(&path);
         }
         MENU_OPEN_LOGS => {
@@ -1542,11 +1523,7 @@ mod tests {
     use super::*;
 
     fn make_status_result(ok: bool, message: &str) -> service::ServiceActionResult {
-        service::ServiceActionResult {
-            action: "status".into(),
-            ok,
-            message: message.into(),
-        }
+        service::ServiceActionResult { action: "status".into(), ok, message: message.into() }
     }
 
     #[test]

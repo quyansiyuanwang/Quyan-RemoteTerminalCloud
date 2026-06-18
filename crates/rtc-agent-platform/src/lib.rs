@@ -149,3 +149,161 @@ fn notes_for(platform: PlatformId) -> Vec<String> {
         ],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── resolve_default_shell ──
+
+    #[test]
+    fn resolve_uses_configured_when_available() {
+        let available = vec![ShellType::Bash, ShellType::Zsh, ShellType::SystemDefault];
+        assert_eq!(resolve_default_shell(ShellType::Bash, &available), ShellType::Bash);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_system_default() {
+        let available = vec![ShellType::SystemDefault, ShellType::Sh];
+        assert_eq!(resolve_default_shell(ShellType::Bash, &available), ShellType::SystemDefault);
+    }
+
+    #[test]
+    fn resolve_falls_back_to_first_available() {
+        let available = vec![ShellType::Zsh];
+        assert_eq!(resolve_default_shell(ShellType::Bash, &available), ShellType::Zsh);
+    }
+
+    #[test]
+    fn resolve_returns_configured_when_none_available() {
+        let available: Vec<ShellType> = vec![];
+        assert_eq!(resolve_default_shell(ShellType::Bash, &available), ShellType::Bash);
+    }
+
+    #[test]
+    fn resolve_configured_is_system_default_and_available() {
+        let available = vec![ShellType::SystemDefault, ShellType::Bash];
+        assert_eq!(
+            resolve_default_shell(ShellType::SystemDefault, &available),
+            ShellType::SystemDefault
+        );
+    }
+
+    #[test]
+    fn resolve_deduplicates_available_shells() {
+        // Even with duplicates, resolve picks configured
+        let available = vec![ShellType::Bash, ShellType::Bash, ShellType::Zsh];
+        assert_eq!(resolve_default_shell(ShellType::Zsh, &available), ShellType::Zsh);
+    }
+
+    // ── current_platform ──
+
+    #[test]
+    fn current_platform_returns_expected() {
+        let platform = current_platform();
+        #[cfg(target_os = "windows")]
+        assert_eq!(platform, PlatformId::Windows);
+        #[cfg(target_os = "linux")]
+        assert_eq!(platform, PlatformId::Linux);
+        #[cfg(target_os = "macos")]
+        assert_eq!(platform, PlatformId::Macos);
+    }
+
+    // ── install_formats_for ──
+
+    #[test]
+    fn install_formats_for_windows() {
+        let formats = install_formats_for(PlatformId::Windows);
+        assert_eq!(formats, vec!["exe"]);
+    }
+
+    #[test]
+    fn install_formats_for_linux() {
+        let formats = install_formats_for(PlatformId::Linux);
+        assert_eq!(formats, vec!["deb", "rpm", "binary"]);
+    }
+
+    #[test]
+    fn install_formats_for_macos() {
+        let formats = install_formats_for(PlatformId::Macos);
+        assert_eq!(formats, vec!["pkg", "signed-helper"]);
+    }
+
+    // ── service_manager_for ──
+
+    #[test]
+    fn service_manager_for_windows() {
+        assert_eq!(service_manager_for(PlatformId::Windows), "Windows Service");
+    }
+
+    #[test]
+    fn service_manager_for_linux() {
+        assert_eq!(service_manager_for(PlatformId::Linux), "systemd");
+    }
+
+    #[test]
+    fn service_manager_for_macos() {
+        assert_eq!(service_manager_for(PlatformId::Macos), "launchd");
+    }
+
+    // ── ssh_check_for ──
+
+    #[test]
+    fn ssh_check_for_windows() {
+        let check = ssh_check_for(PlatformId::Windows);
+        assert!(check.available);
+        assert!(check.detail.contains("sshd"));
+    }
+
+    #[test]
+    fn ssh_check_for_linux() {
+        let check = ssh_check_for(PlatformId::Linux);
+        assert!(check.available);
+        assert!(check.detail.contains("sshd"));
+    }
+
+    #[test]
+    fn ssh_check_for_macos() {
+        let check = ssh_check_for(PlatformId::Macos);
+        assert!(check.available);
+        assert!(check.detail.contains("Remote Login"));
+    }
+
+    // ── notes_for ──
+
+    #[test]
+    fn notes_for_windows() {
+        let notes = notes_for(PlatformId::Windows);
+        assert!(notes.iter().any(|n| n.contains("OpenSSH")));
+    }
+
+    #[test]
+    fn notes_for_linux() {
+        let notes = notes_for(PlatformId::Linux);
+        assert!(notes.iter().any(|n| n.contains("sshd")));
+    }
+
+    #[test]
+    fn notes_for_macos() {
+        let notes = notes_for(PlatformId::Macos);
+        assert!(notes.iter().any(|n| n.contains("Remote Login")));
+    }
+
+    // ── ManagerPaths ──
+
+    #[test]
+    fn manager_paths_is_debug_and_serialize() {
+        let paths = ManagerPaths {
+            config_dir: PathBuf::from("/cfg"),
+            config_file_path: PathBuf::from("/cfg/config.json"),
+            preferences_path: PathBuf::from("/cfg/prefs.json"),
+            logs_dir: PathBuf::from("/logs"),
+        };
+        // Debug format is available
+        let debug = format!("{paths:?}");
+        assert!(debug.contains("/cfg"));
+        // Serialize is available
+        let json = serde_json::to_string(&paths).unwrap();
+        assert!(json.contains("config_dir"));
+    }
+}

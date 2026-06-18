@@ -12,16 +12,14 @@ use std::sync::mpsc;
 use anyhow::{Context, Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand};
 use rtc_agent_config::{
-    AgentState, clear_agent_state, default_server_base_url,
-    has_registration_token_env_override, load_agent_state, load_or_collect_device_fingerprint,
-    save_agent_state,
+    AgentState, clear_agent_state, default_server_base_url, has_registration_token_env_override,
+    load_agent_state, load_or_collect_device_fingerprint, save_agent_state,
 };
-use rtc_agent_platform::{
-    collect_host_snapshot, detect_available_shells, resolve_default_shell,
-};
+use rtc_agent_platform::{collect_host_snapshot, detect_available_shells, resolve_default_shell};
 use rtc_agent_protocol::ShellType;
 use rtc_agent_runtime::{
-    ApiClient, ApiErrorDetails, ApiErrorKind, RegisteredAgentSession, describe_error, run_agent_tunnel,
+    ApiClient, ApiErrorDetails, ApiErrorKind, RegisteredAgentSession, describe_error,
+    run_agent_tunnel,
 };
 use rtc_agent_service as service;
 use serde::Serialize;
@@ -30,8 +28,8 @@ use tracing_subscriber::EnvFilter;
 
 use crate::path_ops::{run_install_path, run_start, run_stop, run_uninstall_path};
 use crate::support::{
-    emit_json, grow_backoff, is_authentication_error, is_interactive_input_available,
-    join_shells, managed_logs_dir, manager_paths, next_backoff_delay, print_runtime_error,
+    emit_json, grow_backoff, is_authentication_error, is_interactive_input_available, join_shells,
+    managed_logs_dir, manager_paths, next_backoff_delay, print_runtime_error,
     prompt_and_persist_registration_token, read_preferences_summary, runtime_config,
     user_label_for_error_kind,
 };
@@ -261,19 +259,25 @@ fn windows_service_main(_arguments: Vec<OsString>) {
 #[cfg(target_os = "windows")]
 fn run_windows_service_worker() -> Result<()> {
     let (shutdown_tx, shutdown_rx) = mpsc::channel();
-    let status_handle = service_control_handler::register(service::WINDOWS_SERVICE_NAME, move |control| {
-        match control {
-            ServiceControl::Stop | ServiceControl::Shutdown => {
-                let _ = shutdown_tx.send(());
-                ServiceControlHandlerResult::NoError
+    let status_handle =
+        service_control_handler::register(service::WINDOWS_SERVICE_NAME, move |control| {
+            match control {
+                ServiceControl::Stop | ServiceControl::Shutdown => {
+                    let _ = shutdown_tx.send(());
+                    ServiceControlHandlerResult::NoError
+                }
+                ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                _ => ServiceControlHandlerResult::NotImplemented,
             }
-            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-            _ => ServiceControlHandlerResult::NotImplemented,
-        }
-    })
-    .context("failed to register Windows service control handler")?;
+        })
+        .context("failed to register Windows service control handler")?;
 
-    set_windows_service_status(&status_handle, ServiceState::StartPending, ServiceControlAccept::empty(), 0)?;
+    set_windows_service_status(
+        &status_handle,
+        ServiceState::StartPending,
+        ServiceControlAccept::empty(),
+        0,
+    )?;
     set_windows_service_status(
         &status_handle,
         ServiceState::Running,
@@ -289,15 +293,30 @@ fn run_windows_service_worker() -> Result<()> {
         }
     });
 
-    set_windows_service_status(&status_handle, ServiceState::StopPending, ServiceControlAccept::empty(), 0)?;
+    set_windows_service_status(
+        &status_handle,
+        ServiceState::StopPending,
+        ServiceControlAccept::empty(),
+        0,
+    )?;
 
     match result {
         Ok(()) => {
-            set_windows_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 0)?;
+            set_windows_service_status(
+                &status_handle,
+                ServiceState::Stopped,
+                ServiceControlAccept::empty(),
+                0,
+            )?;
             Ok(())
         }
         Err(err) => {
-            set_windows_service_status(&status_handle, ServiceState::Stopped, ServiceControlAccept::empty(), 1)?;
+            set_windows_service_status(
+                &status_handle,
+                ServiceState::Stopped,
+                ServiceControlAccept::empty(),
+                1,
+            )?;
             Err(err)
         }
     }
@@ -576,10 +595,7 @@ fn run_service(args: ServiceArgs) -> Result<()> {
 fn detect_install_root() -> String {
     std::env::current_exe()
         .ok()
-        .and_then(|path| {
-            path.parent()
-                .map(|parent| parent.display().to_string())
-        })
+        .and_then(|path| path.parent().map(|parent| parent.display().to_string()))
         .unwrap_or_else(|| ".".into())
 }
 
@@ -831,7 +847,8 @@ async fn run_agent_once() -> Result<()> {
         println!(
             "[remote-terminal-cloud-agent] registered device {} for fingerprint {}",
             session.device_id,
-            &device_fingerprint.device_fingerprint[..12.min(device_fingerprint.device_fingerprint.len())]
+            &device_fingerprint.device_fingerprint
+                [..12.min(device_fingerprint.device_fingerprint.len())]
         );
         if let Err(err) = save_agent_state(&config.config_file_path, &build_agent_state(&session)) {
             eprintln!("[remote-terminal-cloud-agent] warning: could not persist state: {err}");
@@ -870,9 +887,10 @@ async fn run_agent_once() -> Result<()> {
                         "[remote-terminal-cloud-agent] resumed persisted session for device {}",
                         validated_session.device_id
                     );
-                    if let Err(err) =
-                        save_agent_state(&config.config_file_path, &build_agent_state(&validated_session))
-                    {
+                    if let Err(err) = save_agent_state(
+                        &config.config_file_path,
+                        &build_agent_state(&validated_session),
+                    ) {
                         eprintln!(
                             "[remote-terminal-cloud-agent] warning: could not persist validated state: {err}"
                         );
@@ -972,17 +990,20 @@ async fn run_agent_once() -> Result<()> {
                     }
                 }
                 // Persist updated heartbeat state (interval / websocket_url may change).
-                let _ = save_agent_state(&config_file_path, &AgentState {
-                    device_id: heartbeat_session.device_id.clone(),
-                    heartbeat_token: heartbeat_session.heartbeat_token.clone(),
-                    heartbeat_interval_seconds: heartbeat_session.heartbeat_interval_seconds,
-                    websocket_url: heartbeat_session.websocket_url.clone(),
-                    server_base_url: server_base_url.clone(),
-                    device_fingerprint: device_fingerprint.device_fingerprint.clone(),
-                    fingerprint_version: device_fingerprint.fingerprint_version.clone(),
-                    state_version: rtc_agent_config::AGENT_STATE_VERSION,
-                    saved_at_unix_seconds: rtc_agent_config::current_unix_timestamp(),
-                });
+                let _ = save_agent_state(
+                    &config_file_path,
+                    &AgentState {
+                        device_id: heartbeat_session.device_id.clone(),
+                        heartbeat_token: heartbeat_session.heartbeat_token.clone(),
+                        heartbeat_interval_seconds: heartbeat_session.heartbeat_interval_seconds,
+                        websocket_url: heartbeat_session.websocket_url.clone(),
+                        server_base_url: server_base_url.clone(),
+                        device_fingerprint: device_fingerprint.device_fingerprint.clone(),
+                        fingerprint_version: device_fingerprint.fingerprint_version.clone(),
+                        state_version: rtc_agent_config::AGENT_STATE_VERSION,
+                        saved_at_unix_seconds: rtc_agent_config::current_unix_timestamp(),
+                    },
+                );
                 println!(
                     "[remote-terminal-cloud-agent] heartbeat ok for {}; next interval {}s",
                     heartbeat_session.device_id, heartbeat_session.heartbeat_interval_seconds
@@ -1186,19 +1207,13 @@ mod tests {
     fn detect_install_root_is_absolute() {
         // current_exe() resolves to an absolute path, so parent should be absolute too
         let root = detect_install_root();
-        assert!(
-            Path::new(&root).is_absolute(),
-            "install root should be absolute: {root}"
-        );
+        assert!(Path::new(&root).is_absolute(), "install root should be absolute: {root}");
     }
 
     #[test]
     fn detect_install_root_is_a_directory() {
         let root = detect_install_root();
-        assert!(
-            Path::new(&root).is_dir(),
-            "install root should be a directory: {root}"
-        );
+        assert!(Path::new(&root).is_dir(), "install root should be a directory: {root}");
     }
 
     #[test]

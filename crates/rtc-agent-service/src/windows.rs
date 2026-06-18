@@ -22,9 +22,7 @@ pub enum ServiceState {
 
 #[cfg(target_os = "windows")]
 pub fn query_service_state() -> ServiceState {
-    let output = Command::new("sc")
-        .args(["query", WINDOWS_SERVICE_NAME])
-        .output();
+    let output = Command::new("sc").args(["query", WINDOWS_SERVICE_NAME]).output();
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -40,7 +38,10 @@ pub fn query_service_state() -> ServiceState {
 /// Exposed for testing; the text comes either from stdout or stderr of `sc query`.
 #[cfg(target_os = "windows")]
 pub fn parse_sc_query_output(text: &str) -> ServiceState {
-    if text.contains("FAILED 1060") || text.contains("service does not exist") || text.contains("not installed") {
+    if text.contains("FAILED 1060")
+        || text.contains("service does not exist")
+        || text.contains("not installed")
+    {
         return ServiceState::Missing;
     }
     if text.contains("STOPPED") || text.contains("stopped") {
@@ -54,9 +55,7 @@ pub fn parse_sc_query_output(text: &str) -> ServiceState {
 
 #[cfg(target_os = "windows")]
 pub fn service_status() -> ServiceActionResult {
-    let output = Command::new("sc")
-        .args(["query", WINDOWS_SERVICE_NAME])
-        .output();
+    let output = Command::new("sc").args(["query", WINDOWS_SERVICE_NAME]).output();
     match output {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
@@ -83,10 +82,8 @@ pub fn install_service(install_root: &str, token: Option<&str>) -> Result<Servic
         bail!("windows service install requires an install_root");
     }
 
-    let bin_path = format!(
-        r#""{}" service-host"#,
-        Path::new(root).join("rtc-agentd.exe").display()
-    );
+    let bin_path =
+        format!(r#""{}" service-host"#, Path::new(root).join("rtc-agentd.exe").display());
     let status = Command::new("sc")
         .args([
             "create",
@@ -126,10 +123,7 @@ pub fn install_service(install_root: &str, token: Option<&str>) -> Result<Servic
 
 #[cfg(target_os = "windows")]
 pub fn uninstall_service() -> Result<ServiceActionResult> {
-    Command::new("sc")
-        .args(["stop", WINDOWS_SERVICE_NAME])
-        .status()
-        .ok();
+    Command::new("sc").args(["stop", WINDOWS_SERVICE_NAME]).status().ok();
     Command::new("sc")
         .args(["delete", WINDOWS_SERVICE_NAME])
         .status()
@@ -177,10 +171,7 @@ pub fn stop_service() -> Result<ServiceActionResult> {
 
 #[cfg(target_os = "windows")]
 pub fn restart_service() -> Result<ServiceActionResult> {
-    Command::new("sc")
-        .args(["stop", WINDOWS_SERVICE_NAME])
-        .status()
-        .ok();
+    Command::new("sc").args(["stop", WINDOWS_SERVICE_NAME]).status().ok();
     std::thread::sleep(std::time::Duration::from_secs(2));
     Command::new("sc")
         .args(["start", WINDOWS_SERVICE_NAME])
@@ -274,26 +265,17 @@ mod tests {
 
     #[test]
     fn parse_empty_string_is_unknown() {
-        assert_eq!(
-            parse_sc_query_output(""),
-            ServiceState::Unknown("".into())
-        );
+        assert_eq!(parse_sc_query_output(""), ServiceState::Unknown("".into()));
     }
 
     #[test]
     fn parse_whitespace_only_is_unknown() {
-        assert_eq!(
-            parse_sc_query_output("   "),
-            ServiceState::Unknown("".into())
-        );
+        assert_eq!(parse_sc_query_output("   "), ServiceState::Unknown("".into()));
     }
 
     #[test]
     fn parse_newline_only_is_unknown() {
-        assert_eq!(
-            parse_sc_query_output("\n\n"),
-            ServiceState::Unknown("".into())
-        );
+        assert_eq!(parse_sc_query_output("\n\n"), ServiceState::Unknown("".into()));
     }
 
     // ── Edge case: lowercase output variants ──
@@ -347,7 +329,9 @@ mod tests {
         let output = "SERVICE_NAME: RemoteTerminalCloudAgent\nTYPE: OWN_PROCESS\n";
         assert_eq!(
             parse_sc_query_output(output),
-            ServiceState::Unknown("SERVICE_NAME: RemoteTerminalCloudAgent\nTYPE: OWN_PROCESS".into())
+            ServiceState::Unknown(
+                "SERVICE_NAME: RemoteTerminalCloudAgent\nTYPE: OWN_PROCESS".into()
+            )
         );
     }
 
@@ -364,7 +348,8 @@ mod tests {
 
     #[test]
     fn parse_missing_multiline_stderr() {
-        let output = "The specified service does not exist.\n\nTry running with administrator privileges.";
+        let output =
+            "The specified service does not exist.\n\nTry running with administrator privileges.";
         assert_eq!(parse_sc_query_output(output), ServiceState::Missing);
     }
 }

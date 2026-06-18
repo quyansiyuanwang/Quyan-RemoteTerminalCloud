@@ -11,11 +11,11 @@ use anyhow::{Context, Result, anyhow, bail};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use rtc_agent_config::{LOCAL_SERVER_BASE_URL, RELEASE_SERVER_BASE_URL};
-use serde_json::Value;
 use serde::Serialize;
+use serde_json::Value;
 use tar::Builder as TarBuilder;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -87,11 +87,7 @@ pub enum PackagingCommand {
     Bundle,
     Artifact,
     Package,
-    WindowsDesktopBundle {
-        output_dir: Option<PathBuf>,
-        bundles: String,
-        target: Option<String>,
-    },
+    WindowsDesktopBundle { output_dir: Option<PathBuf>, bundles: String, target: Option<String> },
 }
 
 pub fn resolve_context() -> Result<PackagingContext> {
@@ -206,7 +202,8 @@ fn bundle_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
     copy_tree(&ctx.project_root.join("crates"), &ctx.bundle_root.join("crates"))?;
     copy_tree(&ctx.project_root.join("xtask"), &ctx.bundle_root.join("xtask"))?;
 
-    for file_name in ["VERSION", "Cargo.toml", "Cargo.lock", "AGENTS.md", "README.md", "rustfmt.toml"]
+    for file_name in
+        ["VERSION", "Cargo.toml", "Cargo.lock", "AGENTS.md", "README.md", "rustfmt.toml"]
     {
         let src = ctx.project_root.join(file_name);
         if src.is_file() {
@@ -319,19 +316,15 @@ fn bundle_is_complete(ctx: &PackagingContext) -> bool {
     let expected_profile = serde_json::to_value(ctx.build_profile)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned));
-    let actual_profile = bundle_metadata
-        .get("buildProfile")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let actual_profile =
+        bundle_metadata.get("buildProfile").and_then(Value::as_str).map(str::to_owned);
     if actual_profile != expected_profile {
         return false;
     }
 
     let expected_server_base_url = compiled_server_base_url(ctx);
-    let actual_server_base_url = bundle_metadata
-        .get("serverBaseUrl")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let actual_server_base_url =
+        bundle_metadata.get("serverBaseUrl").and_then(Value::as_str).unwrap_or_default();
     if actual_server_base_url != expected_server_base_url {
         return false;
     }
@@ -357,11 +350,7 @@ fn package_command(ctx: &PackagingContext) -> Result<PackagingActionResult> {
         let result = windows_desktop_bundle_command(ctx, Some(&output_dir), "nsis", None)?;
         let mut details = result.details;
         details.insert("mode".into(), "windows-desktop-bundle".into());
-        return Ok(success(
-            "package",
-            "Windows desktop package built.",
-            details,
-        ));
+        return Ok(success("package", "Windows desktop package built.", details));
     }
 
     let result = artifact_command(ctx)?;
@@ -419,9 +408,7 @@ fn darwin_desktop_bundle_command(ctx: &PackagingContext) -> Result<BTreeMap<Stri
             let entry = entry?;
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "dmg") {
-                let target = ctx.platform_out_root.join(
-                    entry.file_name(),
-                );
+                let target = ctx.platform_out_root.join(entry.file_name());
                 copy_file(&path, &target)?;
                 details.insert("dmg".into(), target.display().to_string());
             }
@@ -454,9 +441,9 @@ fn windows_desktop_bundle_command(
     }
 
     let desktop_dir = ctx.project_root.join("apps").join("rtc-agent-desktop");
-    let output_dir = output_dir
-        .map(PathBuf::from)
-        .unwrap_or_else(|| ctx.project_root.join("release").join("artifacts").join("windows-installers").join("tauri"));
+    let output_dir = output_dir.map(PathBuf::from).unwrap_or_else(|| {
+        ctx.project_root.join("release").join("artifacts").join("windows-installers").join("tauri")
+    });
     if output_dir.exists() {
         fs::remove_dir_all(&output_dir)
             .with_context(|| format!("remove stale {}", output_dir.display()))?;
@@ -509,11 +496,7 @@ fn windows_desktop_bundle_command(
     let mut details = BTreeMap::new();
     details.insert("outputDir".into(), output_dir.display().to_string());
     details.insert("bundles".into(), bundles.to_owned());
-    Ok(success(
-        "windows-desktop-bundle",
-        "Tauri desktop bundle built.",
-        details,
-    ))
+    Ok(success("windows-desktop-bundle", "Tauri desktop bundle built.", details))
 }
 
 fn build_cli_binary(
@@ -677,12 +660,7 @@ fn build_native_installer(ctx: &PackagingContext) -> Result<()> {
         "linux" => {
             let mut cmd = Command::new("bash");
             cmd.current_dir(&ctx.project_root)
-                .arg(
-                    ctx.stage_root
-                        .join("packaging")
-                        .join("linux")
-                        .join("build-deb.sh"),
-                )
+                .arg(ctx.stage_root.join("packaging").join("linux").join("build-deb.sh"))
                 .arg(&ctx.stage_root)
                 .arg(ctx.platform_out_root.join(format!("{}.deb", ctx.archive_base_name)))
                 .arg(&ctx.version)
@@ -692,12 +670,7 @@ fn build_native_installer(ctx: &PackagingContext) -> Result<()> {
         "darwin" => {
             let mut cmd = Command::new("bash");
             cmd.current_dir(&ctx.project_root)
-                .arg(
-                    ctx.stage_root
-                        .join("packaging")
-                        .join("macos")
-                        .join("build-pkg.sh"),
-                )
+                .arg(ctx.stage_root.join("packaging").join("macos").join("build-pkg.sh"))
                 .arg(&ctx.stage_root)
                 .arg(ctx.platform_out_root.join(format!("{}.pkg", ctx.archive_base_name)))
                 .arg(&ctx.version)
@@ -732,7 +705,8 @@ fn write_json(path: &Path, value: serde_json::Value) -> Result<()> {
 }
 
 fn zip_directory(src_dir: &Path, output_path: &Path) -> Result<()> {
-    let file = File::create(output_path).with_context(|| format!("create {}", output_path.display()))?;
+    let file =
+        File::create(output_path).with_context(|| format!("create {}", output_path.display()))?;
     let mut writer = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
@@ -749,7 +723,8 @@ fn zip_directory(src_dir: &Path, output_path: &Path) -> Result<()> {
 }
 
 fn tar_gz_directory(parent_dir: &Path, folder_name: &str, output_path: &Path) -> Result<()> {
-    let file = File::create(output_path).with_context(|| format!("create {}", output_path.display()))?;
+    let file =
+        File::create(output_path).with_context(|| format!("create {}", output_path.display()))?;
     let encoder = GzEncoder::new(file, Compression::default());
     let mut builder = TarBuilder::new(encoder);
     builder.follow_symlinks(false);
@@ -779,8 +754,7 @@ fn copy_file(src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    fs::copy(src, dst)
-        .with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
+    fs::copy(src, dst).with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
     let metadata = fs::metadata(src).with_context(|| format!("metadata {}", src.display()))?;
     fs::set_permissions(dst, metadata.permissions())
         .with_context(|| format!("chmod {}", dst.display()))?;
@@ -796,8 +770,7 @@ fn replace_file(src: &Path, dst: &Path) -> Result<()> {
             format!("failed to replace {} (the file may still be in use by rtc-agent or rtc-agent-desktop)", dst.display())
         })?;
     }
-    fs::rename(src, dst)
-        .with_context(|| format!("failed to move {} into place", dst.display()))?;
+    fs::rename(src, dst).with_context(|| format!("failed to move {} into place", dst.display()))?;
     Ok(())
 }
 
@@ -831,21 +804,12 @@ fn validate_release_server_url(
         );
     }
 
-    let payload: Value = serde_json::from_slice(&output.stdout).with_context(|| {
-        format!(
-            "decode {label} version JSON from {}",
-            binary_path.display()
-        )
-    })?;
-    let actual = payload
-        .get("serverBaseUrl")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let payload: Value = serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("decode {label} version JSON from {}", binary_path.display()))?;
+    let actual = payload.get("serverBaseUrl").and_then(Value::as_str).unwrap_or_default();
     let expected = compiled_server_base_url(&ctx);
     if actual != expected {
-        bail!(
-            "{label} compiled with unexpected server base URL `{actual}`; expected `{expected}`"
-        );
+        bail!("{label} compiled with unexpected server base URL `{actual}`; expected `{expected}`");
     }
     Ok(())
 }
@@ -891,8 +855,7 @@ fn dotenv_values(path: &Path) -> Result<BTreeMap<String, String>> {
         return Ok(BTreeMap::new());
     }
 
-    let iter = dotenvy::from_path_iter(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let iter = dotenvy::from_path_iter(path).with_context(|| format!("read {}", path.display()))?;
     let mut values = BTreeMap::new();
     for item in iter {
         let (key, value) = item.with_context(|| format!("parse {}", path.display()))?;
@@ -919,7 +882,10 @@ fn compiled_server_base_url(ctx: &PackagingContext) -> String {
 fn repo_root() -> Result<PathBuf> {
     let mut dir = env::current_dir().context("read current dir")?;
     loop {
-        if dir.join("Cargo.toml").is_file() && dir.join("apps").is_dir() && dir.join("crates").is_dir() {
+        if dir.join("Cargo.toml").is_file()
+            && dir.join("apps").is_dir()
+            && dir.join("crates").is_dir()
+        {
             return Ok(dir);
         }
         if !dir.pop() {
@@ -998,7 +964,11 @@ fn walk_files(root: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn success(command: &str, message: &str, details: BTreeMap<String, String>) -> PackagingActionResult {
+fn success(
+    command: &str,
+    message: &str,
+    details: BTreeMap<String, String>,
+) -> PackagingActionResult {
     PackagingActionResult {
         command: command.to_owned(),
         ok: true,

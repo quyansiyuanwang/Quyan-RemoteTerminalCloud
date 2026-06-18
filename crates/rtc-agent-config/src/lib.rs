@@ -45,7 +45,9 @@ pub fn ensure_dotenv_loaded() {
     DOTENV_ONCE.get_or_init(|| {
         let should_load = env::var("RTC_LOAD_DOTENV")
             .ok()
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .map(|value| {
+                matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+            })
             .unwrap_or(false);
         if !should_load {
             return;
@@ -298,17 +300,11 @@ struct CachedDeviceFingerprint {
 
 /// Derives the state file path from the config file path (sibling `state.json`).
 pub fn state_file_path(config_file_path: &Path) -> PathBuf {
-    config_file_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("state.json")
+    config_file_path.parent().unwrap_or(Path::new(".")).join("state.json")
 }
 
 pub fn device_fingerprint_file_path(config_file_path: &Path) -> PathBuf {
-    config_file_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("device-fingerprint.json")
+    config_file_path.parent().unwrap_or(Path::new(".")).join("device-fingerprint.json")
 }
 
 pub fn load_cached_device_fingerprint(config_file_path: &Path) -> Option<DeviceFingerprint> {
@@ -338,7 +334,8 @@ pub fn save_device_fingerprint(
         sources: sources.clone(),
         updated_at: "cached".to_owned(),
     };
-    fs::write(&path, serde_json::to_string_pretty(&payload)?).with_context(|| format!("write {}", path.display()))
+    fs::write(&path, serde_json::to_string_pretty(&payload)?)
+        .with_context(|| format!("write {}", path.display()))
 }
 
 pub fn collect_device_fingerprint() -> Result<DeviceFingerprint> {
@@ -372,10 +369,7 @@ pub fn load_agent_state(config_file_path: &Path) -> Option<AgentState> {
 }
 
 pub fn current_unix_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_secs()).unwrap_or(0)
 }
 
 pub fn is_agent_state_fresh(state: &AgentState, now_unix_seconds: u64) -> bool {
@@ -417,17 +411,21 @@ fn build_device_fingerprint_from_material(material: FingerprintMaterial) -> Devi
         normalized_parts.push(format!("machine-id={}", normalize_fingerprint_source(machine_id)));
     }
     if let Some(board_serial) = material.board_serial.as_deref() {
-        normalized_parts.push(format!("board-serial={}", normalize_fingerprint_source(board_serial)));
+        normalized_parts
+            .push(format!("board-serial={}", normalize_fingerprint_source(board_serial)));
     }
     if let Some(platform_uuid) = material.platform_uuid.as_deref() {
-        normalized_parts.push(format!("platform-uuid={}", normalize_fingerprint_source(platform_uuid)));
+        normalized_parts
+            .push(format!("platform-uuid={}", normalize_fingerprint_source(platform_uuid)));
     }
 
     let fallback = normalized_parts.is_empty();
     if fallback {
         normalized_parts.push(format!(
             "fallback={}",
-            normalize_fingerprint_source(material.fallback_seed.as_deref().unwrap_or("unknown-device"))
+            normalize_fingerprint_source(
+                material.fallback_seed.as_deref().unwrap_or("unknown-device")
+            )
         ));
     }
 
@@ -470,16 +468,21 @@ fn collect_fingerprint_material() -> FingerprintMaterial {
 
     #[cfg(target_os = "linux")]
     {
-        material.machine_id = read_first_existing_file(&["/etc/machine-id", "/var/lib/dbus/machine-id"]);
+        material.machine_id =
+            read_first_existing_file(&["/etc/machine-id", "/var/lib/dbus/machine-id"]);
     }
 
     #[cfg(target_os = "macos")]
     {
-        material.platform_uuid = read_command_output("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])
-            .and_then(|output| extract_ioplatform_uuid(&output));
+        material.platform_uuid =
+            read_command_output("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])
+                .and_then(|output| extract_ioplatform_uuid(&output));
     }
 
-    if material.machine_id.is_none() && material.platform_uuid.is_none() && material.board_serial.is_none() {
+    if material.machine_id.is_none()
+        && material.platform_uuid.is_none()
+        && material.board_serial.is_none()
+    {
         material.fallback_seed = Some(
             env::var("COMPUTERNAME")
                 .or_else(|_| env::var("HOSTNAME"))
@@ -526,11 +529,7 @@ fn extract_ioplatform_uuid(output: &str) -> Option<String> {
             return None;
         }
         let parts = line.split('"').collect::<Vec<_>>();
-        if parts.len() >= 4 {
-            Some(parts[3].to_owned())
-        } else {
-            None
-        }
+        if parts.len() >= 4 { Some(parts[3].to_owned()) } else { None }
     })
 }
 
@@ -568,9 +567,9 @@ fn parse_shell_type(value: String) -> Option<ShellType> {
 mod tests {
     use super::{
         AGENT_STATE_MAX_AGE_SECONDS, AGENT_STATE_VERSION, AgentState, FingerprintMaterial,
-        build_device_fingerprint_from_material, is_agent_state_fresh, normalize_fingerprint_source,
-        normalize_template_string, default_server_base_url, state_file_path,
-        device_fingerprint_file_path, read_config_file, clear_registration_token,
+        build_device_fingerprint_from_material, clear_registration_token, default_server_base_url,
+        device_fingerprint_file_path, is_agent_state_fresh, normalize_fingerprint_source,
+        normalize_template_string, read_config_file, state_file_path,
     };
     use std::path::Path;
 
@@ -621,7 +620,8 @@ mod tests {
             "fingerprintVersion": "v1"
         });
 
-        let state: AgentState = serde_json::from_value(legacy).expect("legacy state should deserialize");
+        let state: AgentState =
+            serde_json::from_value(legacy).expect("legacy state should deserialize");
         assert_eq!(state.state_version, 0);
         assert_eq!(state.saved_at_unix_seconds, 0);
         assert!(!is_agent_state_fresh(&state, 1_000));
@@ -684,7 +684,10 @@ mod tests {
 
     #[test]
     fn normalize_string_trims_valid() {
-        assert_eq!(normalize_template_string(Some("  token-456  ".into())), Some("token-456".into()));
+        assert_eq!(
+            normalize_template_string(Some("  token-456  ".into())),
+            Some("token-456".into())
+        );
     }
 
     #[test]
