@@ -9,7 +9,9 @@ use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::sync::mpsc;
 
-use anyhow::{Context, Result, bail};
+#[cfg(target_os = "windows")]
+use anyhow::Context;
+use anyhow::{Result, bail};
 use clap::{ArgAction, Args, Parser, Subcommand};
 use rtc_agent_config::{
     AgentState, clear_agent_state, default_server_base_url, has_registration_token_env_override,
