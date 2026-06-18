@@ -569,7 +569,10 @@ mod tests {
     use super::{
         AGENT_STATE_MAX_AGE_SECONDS, AGENT_STATE_VERSION, AgentState, FingerprintMaterial,
         build_device_fingerprint_from_material, is_agent_state_fresh, normalize_fingerprint_source,
+        normalize_template_string, default_server_base_url, state_file_path,
+        device_fingerprint_file_path, read_config_file, clear_registration_token,
     };
+    use std::path::Path;
 
     #[test]
     fn fingerprint_is_stable_across_restart() {
@@ -645,5 +648,199 @@ mod tests {
             ..fresh.clone()
         };
         assert!(!is_agent_state_fresh(&stale, now));
+    }
+
+    // ── normalize_template_string edge cases ──
+
+    #[test]
+    fn normalize_string_none_is_none() {
+        assert_eq!(normalize_template_string(None), None);
+    }
+
+    #[test]
+    fn normalize_string_empty_is_none() {
+        assert_eq!(normalize_template_string(Some("".into())), None);
+    }
+
+    #[test]
+    fn normalize_string_whitespace_only_is_none() {
+        assert_eq!(normalize_template_string(Some("   ".into())), None);
+    }
+
+    #[test]
+    fn normalize_string_placeholder_is_none() {
+        assert_eq!(normalize_template_string(Some("replace-with-real-token".into())), None);
+    }
+
+    #[test]
+    fn normalize_string_placeholder_with_whitespace_is_none() {
+        assert_eq!(normalize_template_string(Some("  replace-with-real-token  ".into())), None);
+    }
+
+    #[test]
+    fn normalize_string_preserves_valid() {
+        assert_eq!(normalize_template_string(Some("abc123".into())), Some("abc123".into()));
+    }
+
+    #[test]
+    fn normalize_string_trims_valid() {
+        assert_eq!(normalize_template_string(Some("  token-456  ".into())), Some("token-456".into()));
+    }
+
+    #[test]
+    fn normalize_string_tabs_and_newlines() {
+        assert_eq!(normalize_template_string(Some("\n\ttoken\t\n".into())), Some("token".into()));
+    }
+
+    #[test]
+    fn normalize_string_numeric() {
+        assert_eq!(normalize_template_string(Some("12345".into())), Some("12345".into()));
+    }
+
+    #[test]
+    fn normalize_string_special_chars() {
+        assert_eq!(
+            normalize_template_string(Some("token_with_underscores-and-dashes".into())),
+            Some("token_with_underscores-and-dashes".into())
+        );
+    }
+
+    // ── default_server_base_url ──
+
+    #[test]
+    fn default_server_base_url_is_non_empty() {
+        let url = default_server_base_url();
+        assert!(!url.is_empty(), "default server base URL must not be empty");
+        assert!(url.starts_with("http"), "default server base URL must start with http: {url}");
+    }
+
+    // ── state_file_path ──
+
+    #[test]
+    fn state_file_path_uses_config_sibling() {
+        let config = Path::new("/some/dir/config.json");
+        let state = state_file_path(config);
+        assert_eq!(state, Path::new("/some/dir/state.json"));
+    }
+
+    #[test]
+    fn state_file_path_fallback_when_no_parent() {
+        // "config.json" has no parent dir, so joining resolves to just "state.json"
+        let config = Path::new("config.json");
+        let state = state_file_path(config);
+        assert_eq!(state, Path::new("state.json"));
+    }
+
+    // ── device_fingerprint_file_path ──
+
+    #[test]
+    fn device_fingerprint_path_uses_config_sibling() {
+        let config = Path::new("/some/dir/config.json");
+        let fp = device_fingerprint_file_path(config);
+        assert_eq!(fp, Path::new("/some/dir/device-fingerprint.json"));
+    }
+
+    #[test]
+    fn device_fingerprint_path_fallback_when_no_parent() {
+        // "config.json" has no parent dir, so joining resolves to just "device-fingerprint.json"
+        let config = Path::new("config.json");
+        let fp = device_fingerprint_file_path(config);
+        assert_eq!(fp, Path::new("device-fingerprint.json"));
+    }
+
+    // ── read_config_file edge cases (no actual file I/O) ──
+
+    #[test]
+    fn read_config_nonexistent_returns_default() {
+        let config = read_config_file(Path::new("/nonexistent/path/config.json"));
+        assert_eq!(config.registration_token, None);
+        assert_eq!(config.run_heartbeat, None);
+        assert_eq!(config.run_tunnel, None);
+    }
+
+    #[test]
+    fn read_config_empty_returns_default() {
+        let dir = std::env::temp_dir().join("rtc-agent-config-test-empty");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.json");
+        // Don't create file at all
+        let config = read_config_file(&path);
+        assert_eq!(config.registration_token, None);
+    }
+
+    // ── is_agent_state_fresh edge cases ──
+
+    #[test]
+    fn state_fresh_zero_saved_at_is_not_fresh() {
+        let state = AgentState {
+            device_id: "d".into(),
+            heartbeat_token: "t".into(),
+            heartbeat_interval_seconds: 30,
+            websocket_url: "wss://x".into(),
+            server_base_url: "".into(),
+            device_fingerprint: "f".into(),
+            fingerprint_version: "v1".into(),
+            state_version: AGENT_STATE_VERSION,
+            saved_at_unix_seconds: 0,
+        };
+        assert!(!is_agent_state_fresh(&state, 10_000));
+    }
+
+    #[test]
+    fn state_fresh_future_timestamp_is_not_fresh() {
+        let state = AgentState {
+            saved_at_unix_seconds: 20_000,
+            ..AgentState {
+                device_id: "d".into(),
+                heartbeat_token: "t".into(),
+                heartbeat_interval_seconds: 30,
+                websocket_url: "wss://x".into(),
+                server_base_url: "".into(),
+                device_fingerprint: "f".into(),
+                fingerprint_version: "v1".into(),
+                state_version: AGENT_STATE_VERSION,
+                saved_at_unix_seconds: 0,
+            }
+        };
+        // saved_at is in the future relative to now
+        assert!(!is_agent_state_fresh(&state, 10_000));
+    }
+
+    #[test]
+    fn state_fresh_wrong_version_is_not_fresh() {
+        let state = AgentState {
+            state_version: AGENT_STATE_VERSION + 99,
+            ..AgentState {
+                device_id: "d".into(),
+                heartbeat_token: "t".into(),
+                heartbeat_interval_seconds: 30,
+                websocket_url: "wss://x".into(),
+                server_base_url: "".into(),
+                device_fingerprint: "f".into(),
+                fingerprint_version: "v1".into(),
+                state_version: 0,
+                saved_at_unix_seconds: 0,
+            }
+        };
+        assert!(!is_agent_state_fresh(&state, 10_000));
+    }
+
+    // ── clear_registration_token ──
+
+    #[test]
+    fn clear_token_from_valid_config() {
+        let dir = std::env::temp_dir().join("rtc-agent-config-test-clear");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.json");
+        let original = r#"{"registrationToken":"secret123"}"#;
+        std::fs::write(&path, original).expect("write test config");
+
+        clear_registration_token(&path).expect("clear should succeed");
+
+        let config = read_config_file(&path);
+        assert_eq!(config.registration_token, None);
+
+        // Cleanup
+        let _ = std::fs::remove_file(&path);
     }
 }

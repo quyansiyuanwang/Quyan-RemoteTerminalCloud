@@ -1536,3 +1536,70 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_status_result(ok: bool, message: &str) -> service::ServiceActionResult {
+        service::ServiceActionResult {
+            action: "status".into(),
+            ok,
+            message: message.into(),
+        }
+    }
+
+    #[test]
+    fn service_is_running() {
+        let result = make_status_result(true, "STATE              : 4  RUNNING");
+        assert!(looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn service_is_stopped() {
+        let result = make_status_result(true, "STATE              : 1  STOPPED");
+        assert!(!looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn service_stop_pending() {
+        let result = make_status_result(true, "STATE              : 3  STOP_PENDING");
+        assert!(!looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn service_start_pending() {
+        let result = make_status_result(true, "STATE              : 2  START_PENDING");
+        assert!(!looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn service_status_query_failed() {
+        let result = make_status_result(false, "failed to query service");
+        assert!(!looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn service_not_installed() {
+        let result = make_status_result(
+            false,
+            "The specified service does not exist as an installed service.",
+        );
+        assert!(!looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn systemctl_active_running() {
+        let result = make_status_result(
+            true,
+            "● remote-terminal-cloud-agent.service - Remote Terminal Cloud Agent\n   Active: active (running)",
+        );
+        assert!(looks_like_service_running(&result));
+    }
+
+    #[test]
+    fn launchctl_is_running() {
+        let result = make_status_result(true, "state = running");
+        assert!(looks_like_service_running(&result));
+    }
+}

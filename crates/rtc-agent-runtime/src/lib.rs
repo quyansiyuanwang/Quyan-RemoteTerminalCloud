@@ -543,7 +543,9 @@ fn parse_backend_error_body(body_text: &str) -> BackendErrorBody {
     }
 
     if let Ok(parsed) = serde_json::from_str::<BackendErrorBody>(trimmed) {
-        return parsed;
+        if parsed.code.is_some() || parsed.message.is_some() {
+            return parsed;
+        }
     }
 
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
@@ -655,4 +657,168 @@ fn fallback_backend_message(status: u16, body_text: &str) -> String {
         return format!("HTTP {status}");
     }
     trimmed.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- classify_backend_error ---
+
+    #[test]
+    fn backend_invalid_token_by_message() {
+        let result = classify_backend_error(200, None, "Invalid or expired registration token");
+        assert_eq!(result, ApiErrorKind::InvalidToken);
+    }
+
+    #[test]
+    fn backend_invalid_token_alt_phrasing() {
+        let result = classify_backend_error(200, None, "invalid registration token");
+        assert_eq!(result, ApiErrorKind::InvalidToken);
+    }
+
+    #[test]
+    fn backend_token_expired() {
+        let result = classify_backend_error(200, None, "token expired");
+        assert_eq!(result, ApiErrorKind::InvalidToken);
+    }
+
+    #[test]
+    fn backend_device_limit_reached() {
+        let result = classify_backend_error(200, None, "device limit reached");
+        assert_eq!(result, ApiErrorKind::DeviceLimitReached);
+    }
+
+    #[test]
+    fn backend_entitlement_message() {
+        let result = classify_backend_error(200, None, "entitlement check failed");
+        assert_eq!(result, ApiErrorKind::DeviceLimitReached);
+    }
+
+    #[test]
+    fn backend_unauthorized_by_status_401() {
+        let result = classify_backend_error(401, None, "unauthorized");
+        assert_eq!(result, ApiErrorKind::Unauthorized);
+    }
+
+    #[test]
+    fn backend_unauthorized_by_status_403() {
+        let result = classify_backend_error(403, None, "forbidden");
+        assert_eq!(result, ApiErrorKind::Unauthorized);
+    }
+
+    #[test]
+    fn backend_gateway_unavailable_502() {
+        let result = classify_backend_error(502, None, "bad gateway");
+        assert_eq!(result, ApiErrorKind::GatewayUnavailable);
+    }
+
+    #[test]
+    fn backend_gateway_unavailable_503() {
+        let result = classify_backend_error(503, None, "service unavailable");
+        assert_eq!(result, ApiErrorKind::GatewayUnavailable);
+    }
+
+    #[test]
+    fn backend_gateway_unavailable_504() {
+        let result = classify_backend_error(504, None, "gateway timeout");
+        assert_eq!(result, ApiErrorKind::GatewayUnavailable);
+    }
+
+    #[test]
+    fn backend_proxy_by_status_407() {
+        let result = classify_backend_error(407, None, "proxy auth required");
+        assert_eq!(result, ApiErrorKind::ProxyConfiguration);
+    }
+
+    #[test]
+    fn backend_proxy_by_message() {
+        let result = classify_backend_error(200, None, "proxy configuration error");
+        assert_eq!(result, ApiErrorKind::ProxyConfiguration);
+    }
+
+    #[test]
+    fn backend_server_rejected_4xx() {
+        let result = classify_backend_error(400, None, "bad request");
+        assert_eq!(result, ApiErrorKind::ServerRejected);
+    }
+
+    #[test]
+    fn backend_server_rejected_404() {
+        let result = classify_backend_error(404, None, "not found");
+        assert_eq!(result, ApiErrorKind::ServerRejected);
+    }
+
+    #[test]
+    fn backend_server_rejected_409() {
+        let result = classify_backend_error(409, None, "conflict");
+        assert_eq!(result, ApiErrorKind::ServerRejected);
+    }
+
+    #[test]
+    fn backend_server_rejected_code_1002() {
+        let result = classify_backend_error(200, Some(1002), "custom error");
+        assert_eq!(result, ApiErrorKind::ServerRejected);
+    }
+
+    #[test]
+    fn backend_transport_5xx() {
+        let result = classify_backend_error(500, None, "internal server error");
+        assert_eq!(result, ApiErrorKind::Transport);
+    }
+
+    #[test]
+    fn backend_unexpected_status() {
+        let result = classify_backend_error(299, None, "ok but unexpected");
+        assert_eq!(result, ApiErrorKind::Unexpected);
+    }
+
+    // --- parse_backend_error_body ---
+
+    #[test]
+    fn parse_error_body_empty() {
+        let result = parse_backend_error_body("");
+        assert_eq!(result.code, None);
+        assert_eq!(result.message, None);
+    }
+
+    #[test]
+    fn parse_error_body_whitespace() {
+        let result = parse_backend_error_body("  ");
+        assert_eq!(result.code, None);
+        assert_eq!(result.message, None);
+    }
+
+    #[test]
+    fn parse_error_body_standard_json() {
+        let result = parse_backend_error_body(r#"{"code":1001,"message":"invalid"}"#);
+        assert_eq!(result.code, Some(1001));
+        assert_eq!(result.message, Some("invalid".into()));
+    }
+
+    #[test]
+    fn parse_error_body_with_error_field() {
+        let result = parse_backend_error_body(r#"{"error":"not authorized"}"#);
+        assert_eq!(result.code, None);
+        assert_eq!(result.message, Some("not authorized".into()));
+    }
+
+    #[test]
+    fn parse_error_body_non_json_fallback() {
+        let result = parse_backend_error_body("raw text error");
+        assert_eq!(result.code, None);
+        assert_eq!(result.message, Some("raw text error".into()));
+    }
+
+    // --- fallback_backend_message ---
+
+    #[test]
+    fn fallback_message_empty_body() {
+        assert_eq!(fallback_backend_message(502, ""), "HTTP 502");
+    }
+
+    #[test]
+    fn fallback_message_with_body() {
+        assert_eq!(fallback_backend_message(502, "upstream failed"), "upstream failed");
+    }
 }

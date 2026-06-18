@@ -1137,3 +1137,76 @@ impl From<ApiErrorDetails> for VerifyErrorDetails {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── compute_retry_delay ──
+
+    #[test]
+    fn compute_retry_delay_attempt_zero() {
+        assert_eq!(compute_retry_delay(0), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn compute_retry_delay_attempt_one() {
+        assert_eq!(compute_retry_delay(1), Duration::from_secs(20));
+    }
+
+    #[test]
+    fn compute_retry_delay_attempt_two() {
+        assert_eq!(compute_retry_delay(2), Duration::from_secs(40));
+    }
+
+    #[test]
+    fn compute_retry_delay_attempt_three() {
+        assert_eq!(compute_retry_delay(3), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn compute_retry_delay_attempt_five() {
+        assert_eq!(compute_retry_delay(5), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn compute_retry_delay_attempt_large_is_capped() {
+        assert_eq!(compute_retry_delay(999), Duration::from_secs(60));
+    }
+
+    // ── detect_install_root ──
+
+    #[test]
+    fn detect_install_root_returns_non_empty() {
+        let root = detect_install_root();
+        assert!(!root.is_empty(), "install root must not be empty");
+    }
+
+    #[test]
+    fn detect_install_root_is_absolute() {
+        // current_exe() resolves to an absolute path, so parent should be absolute too
+        let root = detect_install_root();
+        assert!(
+            Path::new(&root).is_absolute(),
+            "install root should be absolute: {root}"
+        );
+    }
+
+    #[test]
+    fn detect_install_root_is_a_directory() {
+        let root = detect_install_root();
+        assert!(
+            Path::new(&root).is_dir(),
+            "install root should be a directory: {root}"
+        );
+    }
+
+    #[test]
+    fn detect_install_root_does_not_end_with_exe() {
+        let root = detect_install_root();
+        assert!(
+            !root.ends_with(".exe") && !root.ends_with("rtc-agentd"),
+            "install root should be a parent directory, not the binary: {root}"
+        );
+    }
+}

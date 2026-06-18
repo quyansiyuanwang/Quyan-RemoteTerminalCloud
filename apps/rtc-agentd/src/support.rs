@@ -118,6 +118,153 @@ pub fn print_runtime_error(prefix: &str, err: &anyhow::Error) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- grow_backoff ---
+
+    #[test]
+    fn grow_backoff_doubles() {
+        assert_eq!(grow_backoff(Duration::from_secs(2)), Duration::from_secs(4));
+        assert_eq!(grow_backoff(Duration::from_secs(4)), Duration::from_secs(8));
+        assert_eq!(grow_backoff(Duration::from_secs(8)), Duration::from_secs(16));
+    }
+
+    #[test]
+    fn grow_backoff_capped_at_max() {
+        let max = Duration::from_secs(60);
+        assert_eq!(grow_backoff(Duration::from_secs(60)), max);
+        assert_eq!(grow_backoff(Duration::from_secs(100)), max);
+    }
+
+    #[test]
+    fn grow_backoff_zero_stays_zero() {
+        assert_eq!(grow_backoff(Duration::ZERO), Duration::ZERO);
+    }
+
+    // --- next_backoff_delay ---
+
+    #[test]
+    fn next_backoff_delay_at_least_base() {
+        let delay = next_backoff_delay(Duration::from_secs(10));
+        assert!(delay >= Duration::from_secs(10));
+        assert!(delay <= Duration::from_secs(11));
+    }
+
+    // --- join_shells ---
+
+    #[test]
+    fn join_shells_empty() {
+        assert_eq!(join_shells(&[]), "none");
+    }
+
+    #[test]
+    fn join_shells_single() {
+        let shells = [ShellType::Bash];
+        assert_eq!(join_shells(&shells), "bash");
+    }
+
+    #[test]
+    fn join_shells_multiple() {
+        let shells = [ShellType::Bash, ShellType::Zsh, ShellType::Powershell];
+        let result = join_shells(&shells);
+        assert!(result.contains("bash"));
+        assert!(result.contains("zsh"));
+        assert!(result.contains("powershell"));
+        assert_eq!(result.matches(", ").count(), 2);
+    }
+
+    // --- is_authentication_error ---
+
+    #[test]
+    fn auth_error_invalid_token() {
+        let err = anyhow::anyhow!(rtc_agent_runtime::ApiError {
+            kind: rtc_agent_runtime::ApiErrorKind::InvalidToken,
+            status: Some(401),
+            code: None,
+            message: "invalid token".into(),
+            suggestion: "update token".into(),
+        });
+        assert!(is_authentication_error(&err));
+    }
+
+    #[test]
+    fn auth_error_unauthorized() {
+        let err = anyhow::anyhow!(rtc_agent_runtime::ApiError {
+            kind: rtc_agent_runtime::ApiErrorKind::Unauthorized,
+            status: Some(403),
+            code: None,
+            message: "unauthorized".into(),
+            suggestion: "check credentials".into(),
+        });
+        assert!(is_authentication_error(&err));
+    }
+
+    #[test]
+    fn transport_error_not_auth() {
+        let err = anyhow::anyhow!(rtc_agent_runtime::ApiError {
+            kind: rtc_agent_runtime::ApiErrorKind::Transport,
+            status: Some(503),
+            code: None,
+            message: "service unavailable".into(),
+            suggestion: "retry later".into(),
+        });
+        assert!(!is_authentication_error(&err));
+    }
+
+    #[test]
+    fn generic_error_not_auth() {
+        let err = anyhow::anyhow!("something completely different");
+        assert!(!is_authentication_error(&err));
+    }
+
+    // --- normalize_template_string (replicating the function inline to test without dep) ---
+
+    fn normalize(value: Option<&str>) -> Option<String> {
+        let value = value?.trim().to_owned();
+        match value.as_str() {
+            "" | "replace-with-real-token" => None,
+            _ => Some(value),
+        }
+    }
+
+    #[test]
+    fn normalize_none_is_none() {
+        assert_eq!(normalize(None), None);
+    }
+
+    #[test]
+    fn normalize_empty_is_none() {
+        assert_eq!(normalize(Some("")), None);
+    }
+
+    #[test]
+    fn normalize_whitespace_only_is_none() {
+        assert_eq!(normalize(Some("  ")), None);
+    }
+
+    #[test]
+    fn normalize_placeholder_token_is_none() {
+        assert_eq!(normalize(Some("replace-with-real-token")), None);
+    }
+
+    #[test]
+    fn normalize_valid_token_preserved() {
+        assert_eq!(normalize(Some("abc123")), Some("abc123".into()));
+    }
+
+    #[test]
+    fn normalize_valid_token_trimmed() {
+        assert_eq!(normalize(Some("  abc-456  ")), Some("abc-456".into()));
+    }
+
+    #[test]
+    fn normalize_placeholder_with_whitespace() {
+        assert_eq!(normalize(Some("  replace-with-real-token  ")), None);
+    }
+}
+
 pub fn user_label_for_error_kind(kind: &ApiErrorKind) -> &'static str {
     match kind {
         ApiErrorKind::InvalidToken => "invalid or expired token",
