@@ -1,16 +1,13 @@
-name: Auto Create Draft PR
+name: Auto PR to Master
 
 on:
-  push:
-    branches: [dev]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize]
 
 jobs:
   create-pr:
     runs-on: ubuntu-latest
-    if: |
-      !contains(github.event.head_commit.message, '[skip ci]') &&
-      !contains(github.event.head_commit.message, '[skip cd]') &&
-      !contains(github.event.head_commit.message, '[skip cicd]')
     permissions:
       pull-requests: write
       contents: read
@@ -26,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create Draft PR to master
+      - name: Update PR to master
         id: create-or-update
         timeout-minutes: 10
         uses: actions/github-script@v7
@@ -37,29 +34,24 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { data: prs } = await github.rest.pulls.list({
+            const pr = context.payload.pull_request;
+
+            const { data: commits } = await github.rest.pulls.listCommits({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              head: `${context.repo.owner}:dev`,
-              base: 'master',
-              state: 'open',
+              pull_number: pr.number,
+              per_page: 100,
             });
 
-            const existingPr = prs.length > 0 ? prs[0] : null;
-
-            const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              basehead: 'master...dev',
-            });
-
-            const commitList = comparison.commits
+            const commitList = commits
               .map(c => `- ${c.commit.message.split('\n')[0]} (${c.sha.slice(0, 7)})`)
               .reverse()
               .join('\n');
 
-            const commitSubjects = comparison.commits.map(c => c.commit.message.split('\n')[0]);
+            const commitSubjects = commits.map(c => c.commit.message.split('\n')[0]);
             const commitMessages = commitSubjects.slice(-20).join('\n');
+            const aheadBy = commits.length;
+
             const titleTimeoutMs = Number(process.env.AI_TITLE_TIMEOUT_MS || 120000);
             const baseUrl = (process.env.OPENAI_BASE_URL || 'https://api.openai.com').replace(/\/$/, '');
             const truncateForLog = (value, maxLength = 400) => {
@@ -118,8 +110,10 @@ jobs:
 
               return typeof responseText === 'string' ? responseText : '';
             };
+
+            const isOpened = context.payload.action === 'opened';
             let aiTitle = '';
-            if (!existingPr && process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL) {
+            if (isOpened && process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL) {
               try {
                 const requestPayload = {
                   model: process.env.OPENAI_MODEL,
@@ -170,63 +164,28 @@ jobs:
               } catch (error) {
                 console.log('Failed to generate AI title:', error.message);
               }
-            } else if (existingPr) {
-              console.log(`Skipping AI title generation because PR #${existingPr.number} already exists.`);
+            } else if (!isOpened) {
+              console.log(`Skipping AI title generation (action=${context.payload.action}), keeping existing title.`);
             } else {
               console.log('Skipping AI title generation because OPENAI_API_KEY or OPENAI_MODEL is missing.');
             }
 
-            const date = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
-            const fallbackTitle = `[Agent] Merge dev → master (${date} UTC+8)`;
-            const title = existingPr?.title || aiTitle || fallbackTitle;
+            const title = isOpened ? (aiTitle || pr.title) : pr.title;
 
-            const body = [
-              '## Remote Terminal Cloud Agent Changes',
-              '',
-              'This PR was automatically created when changes were pushed to `dev`.',
-              '',
-              `### Commits (${comparison.ahead_by} ahead of master)`,
-              '',
-              commitList || '_No new commits._',
-            ].join('\n');
+            const body = commitList || '_No new commits._';
 
-            if (comparison.ahead_by === 0) {
-              console.log('dev is up to date with master, skipping PR creation.');
-              return;
-            }
-
-            let prNumber;
-            if (existingPr) {
-              prNumber = existingPr.number;
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                title,
-                body,
-              });
-              console.log(`Updated body of PR #${prNumber}: ${existingPr.html_url}`);
-              core.setOutput('pr_number', prNumber);
-              core.setOutput('pr_title', title);
-              core.setOutput('pr_body', body);
-              core.setOutput('needs_label', 'true');
-            } else {
-              const { data: pr } = await github.rest.pulls.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                head: 'dev',
-                base: 'master',
-                body,
-                draft: true,
-              });
-              prNumber = pr.number;
-              console.log(`Created draft PR #${prNumber}: ${pr.html_url}`);
-              core.setOutput('pr_number', prNumber);
-              core.setOutput('pr_title', title);
-              core.setOutput('pr_body', body);
-              core.setOutput('needs_label', 'true');
-            }
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              title,
+              body,
+            });
+            console.log(`Updated PR #${pr.number}: ${pr.html_url}`);
+            core.setOutput('pr_number', pr.number);
+            core.setOutput('pr_title', title);
+            core.setOutput('pr_body', body);
+            core.setOutput('needs_label', 'true');
 
   call-auto-label:
     needs: create-pr
