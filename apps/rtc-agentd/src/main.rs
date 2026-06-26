@@ -52,6 +52,7 @@ const MISSING_CONFIG_RETRY: Duration = Duration::from_secs(30);
 const RUNTIME_RETRY_INTERVAL: Duration = Duration::from_secs(10);
 const INITIAL_BACKOFF_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_INNER_RETRY: u32 = 5;
 
 #[derive(Parser)]
 #[command(name = "rtc-agent", version = VERSION, about = "Remote Terminal Cloud Agent")]
@@ -956,6 +957,7 @@ async fn run_agent_once() -> Result<()> {
         let mut heartbeat_session = session.clone();
         tasks.spawn(async move {
             let mut failure_backoff = INITIAL_BACKOFF_INTERVAL;
+            let mut failure_count = 0_u32;
             loop {
                 tokio::time::sleep(Duration::from_secs(
                     heartbeat_session.heartbeat_interval_seconds.max(1) as u64,
@@ -974,17 +976,20 @@ async fn run_agent_once() -> Result<()> {
                     Ok(next_session) => {
                         heartbeat_session = next_session;
                         failure_backoff = INITIAL_BACKOFF_INTERVAL;
+                        failure_count = 0;
                     }
                     Err(err) => {
+                        failure_count = failure_count.saturating_add(1);
                         print_runtime_error("[remote-terminal-cloud-agent] heartbeat failed", &err);
-                        if is_authentication_error(&err) {
+                        if is_authentication_error(&err) || failure_count >= MAX_INNER_RETRY {
                             clear_agent_state(&config_file_path);
                             return Err(err);
                         }
                         let sleep_for = next_backoff_delay(failure_backoff);
                         eprintln!(
-                            "[remote-terminal-cloud-agent] heartbeat retrying in {} seconds.",
-                            sleep_for.as_secs()
+                            "[remote-terminal-cloud-agent] heartbeat retrying in {} seconds (failure {}).",
+                            sleep_for.as_secs(),
+                            failure_count
                         );
                         tokio::time::sleep(sleep_for).await;
                         failure_backoff = grow_backoff(failure_backoff);
@@ -1023,6 +1028,7 @@ async fn run_agent_once() -> Result<()> {
         let tunnel_session = session.clone();
         tasks.spawn(async move {
             let mut failure_backoff = INITIAL_BACKOFF_INTERVAL;
+            let mut failure_count = 0_u32;
             loop {
                 let current_session = tunnel_session.clone();
                 match run_agent_tunnel(
@@ -1035,6 +1041,7 @@ async fn run_agent_once() -> Result<()> {
                 {
                     Ok(()) => {
                         failure_backoff = INITIAL_BACKOFF_INTERVAL;
+                        failure_count = 0;
                         let sleep_for = next_backoff_delay(failure_backoff);
                         eprintln!(
                             "[remote-terminal-cloud-agent] tunnel closed; reconnecting in {} seconds.",
@@ -1044,15 +1051,17 @@ async fn run_agent_once() -> Result<()> {
                         failure_backoff = grow_backoff(failure_backoff);
                     }
                     Err(err) => {
+                        failure_count = failure_count.saturating_add(1);
                         print_runtime_error("[remote-terminal-cloud-agent] tunnel failed", &err);
-                        if is_authentication_error(&err) {
+                        if is_authentication_error(&err) || failure_count >= MAX_INNER_RETRY {
                             clear_agent_state(&config_file_path);
                             return Err(err);
                         }
                         let sleep_for = next_backoff_delay(failure_backoff);
                         eprintln!(
-                            "[remote-terminal-cloud-agent] tunnel retrying in {} seconds.",
-                            sleep_for.as_secs()
+                            "[remote-terminal-cloud-agent] tunnel retrying in {} seconds (failure {}).",
+                            sleep_for.as_secs(),
+                            failure_count
                         );
                         tokio::time::sleep(sleep_for).await;
                         failure_backoff = grow_backoff(failure_backoff);
