@@ -107,7 +107,7 @@ impl ApiClient {
         snapshot: HostSnapshot,
     ) -> Result<RegisteredAgentSession> {
         let url =
-            format!("{}/remote-terminal/agent/register", server_base_url.trim_end_matches('/'));
+            format!("{}/v1/remote-terminal/agent/register", server_base_url.trim_end_matches('/'));
         let response = self
             .http
             .post(url)
@@ -144,7 +144,7 @@ impl ApiClient {
         snapshot: HostSnapshot,
     ) -> Result<RegisteredAgentSession> {
         let url =
-            format!("{}/remote-terminal/agent/heartbeat", server_base_url.trim_end_matches('/'));
+            format!("{}/v1/remote-terminal/agent/heartbeat", server_base_url.trim_end_matches('/'));
         let response = self
             .http
             .post(url)
@@ -323,7 +323,7 @@ pub fn build_websocket_url(
             other => bail!("unsupported server base URL scheme: {}", other),
         })
         .map_err(|_| anyhow::anyhow!("invalid websocket scheme"))?;
-    parsed.set_path("/remote-terminal/ws");
+    parsed.set_path("/v1/remote-terminal/ws");
     parsed
         .query_pairs_mut()
         .append_pair("role", "agent")
