@@ -157,7 +157,7 @@ async fn handle_http_connection(
     }
     state.requests_seen.fetch_add(1, Ordering::SeqCst);
 
-    let (status_line, payload) = if request_line.starts_with("POST /remote-terminal/agent/register")
+    let (status_line, payload) = if request_line.starts_with("POST /v1/remote-terminal/agent/register")
     {
         let request: AgentRegistrationRequest = serde_json::from_slice(&body)?;
         assert_eq!(request.device_fingerprint, "abcd1234");
@@ -168,11 +168,11 @@ async fn handle_http_connection(
                 device_id: "device-123".into(),
                 heartbeat_interval_seconds: 1,
                 heartbeat_token: "heartbeat-abc".into(),
-                websocket_url: format!("ws://{}/remote-terminal/ws", ws_addr),
+                websocket_url: format!("ws://{}/v1/remote-terminal/ws", ws_addr),
                 accepted_at: "2026-06-11T00:00:00Z".into(),
             })?,
         )
-    } else if request_line.starts_with("POST /remote-terminal/agent/heartbeat") {
+    } else if request_line.starts_with("POST /v1/remote-terminal/agent/heartbeat") {
         let _: AgentHeartbeatRequest = serde_json::from_slice(&body)?;
         (
             "HTTP/1.1 200 OK",
