@@ -157,35 +157,35 @@ async fn handle_http_connection(
     }
     state.requests_seen.fetch_add(1, Ordering::SeqCst);
 
-    let (status_line, payload) = if request_line.starts_with("POST /v1/remote-terminal/agent/register")
-    {
-        let request: AgentRegistrationRequest = serde_json::from_slice(&body)?;
-        assert_eq!(request.device_fingerprint, "abcd1234");
-        assert_eq!(request.fingerprint_version, "v1");
-        (
-            "HTTP/1.1 200 OK",
-            serde_json::to_vec(&AgentRegistrationResponse {
-                device_id: "device-123".into(),
-                heartbeat_interval_seconds: 1,
-                heartbeat_token: "heartbeat-abc".into(),
-                websocket_url: format!("ws://{}/v1/remote-terminal/ws", ws_addr),
-                accepted_at: "2026-06-11T00:00:00Z".into(),
-            })?,
-        )
-    } else if request_line.starts_with("POST /v1/remote-terminal/agent/heartbeat") {
-        let _: AgentHeartbeatRequest = serde_json::from_slice(&body)?;
-        (
-            "HTTP/1.1 200 OK",
-            serde_json::to_vec(&AgentHeartbeatResponse {
-                ok: true,
-                next_heartbeat_interval_seconds: 2,
-                websocket_url: String::new(),
-                server_time: "2026-06-11T00:00:01Z".into(),
-            })?,
-        )
-    } else {
-        ("HTTP/1.1 404 Not Found", br#"{"error":"not found"}"#.to_vec())
-    };
+    let (status_line, payload) =
+        if request_line.starts_with("POST /v1/remote-terminal/agent/register") {
+            let request: AgentRegistrationRequest = serde_json::from_slice(&body)?;
+            assert_eq!(request.device_fingerprint, "abcd1234");
+            assert_eq!(request.fingerprint_version, "v1");
+            (
+                "HTTP/1.1 200 OK",
+                serde_json::to_vec(&AgentRegistrationResponse {
+                    device_id: "device-123".into(),
+                    heartbeat_interval_seconds: 1,
+                    heartbeat_token: "heartbeat-abc".into(),
+                    websocket_url: format!("ws://{}/v1/remote-terminal/ws", ws_addr),
+                    accepted_at: "2026-06-11T00:00:00Z".into(),
+                })?,
+            )
+        } else if request_line.starts_with("POST /v1/remote-terminal/agent/heartbeat") {
+            let _: AgentHeartbeatRequest = serde_json::from_slice(&body)?;
+            (
+                "HTTP/1.1 200 OK",
+                serde_json::to_vec(&AgentHeartbeatResponse {
+                    ok: true,
+                    next_heartbeat_interval_seconds: 2,
+                    websocket_url: String::new(),
+                    server_time: "2026-06-11T00:00:01Z".into(),
+                })?,
+            )
+        } else {
+            ("HTTP/1.1 404 Not Found", br#"{"error":"not found"}"#.to_vec())
+        };
 
     let response = format!(
         "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
