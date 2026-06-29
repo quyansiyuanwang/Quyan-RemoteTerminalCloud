@@ -333,4 +333,4 @@ jobs:
             -H "Authorization: Bearer $JSON_ENDPOINT_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{\"name\":\"RemoteTerminalCloudVersionPoint\",\"jsonContent\":$versions,\"isPublic\":true}" \
-            "https://api.qysyw.cn/json-endpoints/$JSON_ENDPOINT_ID"
+            "https://api.qysyw.cn/v1/json-endpoints/$JSON_ENDPOINT_ID"
